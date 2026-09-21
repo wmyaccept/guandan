@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>掼蛋桌</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="lobby" class="lobby">
+    <div class="lobby-copy">
+      <p class="kicker">四人两副牌</p>
+      <h1>掼蛋</h1>
+      <p class="sub">南北一家，东西一家。从 2 打到 A。</p>
+    </div>
+    <form id="entry" class="entry">
+      <label>
+        昵称
+        <input id="name" maxlength="12" autocomplete="nickname" />
+      </label>
+      <label>
+        房间号
+        <input id="code" maxlength="6" placeholder="加入时填写" autocomplete="off" />
+      </label>
+      <div class="entry-actions">
+        <button type="button" id="createBtn">开新桌</button>
+        <button type="button" id="joinBtn" class="ghost">加入</button>
+      </div>
+      <p id="lobbyError" class="error"></p>
+    </form>
+  </div>
+
+  <div id="table" class="table hidden">
+    <header class="topbar">
+      <div>
+        <span class="room" id="roomCode"></span>
+        <span id="levelLine"></span>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="botBtn">补机器人</button>
+        <button type="button" id="startBtn">开局</button>
+        <button type="button" id="nextBtn" class="hidden">下一局</button>
+      </div>
+    </header>
+
+    <section class="felt">
+      <article class="seat seat-top" data-view="2"></article>
+      <article class="seat seat-left" data-view="3"></article>
+      <article class="seat seat-right" data-view="1"></article>
+      <article class="seat seat-bottom" data-view="0"></article>
+      <div class="center">
+        <div id="trick" class="trick"></div>
+        <p id="banner" class="banner"></p>
+      </div>
+    </section>
+
+    <footer class="dock">
+      <div id="hand" class="hand"></div>
+      <div class="play-actions">
+        <button type="button" id="hintBtn" class="ghost">提示</button>
+        <button type="button" id="passBtn">不要</button>
+        <button type="button" id="playBtn">出牌</button>
+      </div>
+    </footer>
+    <aside id="log" class="log"></aside>
+    <p id="toast" class="toast hidden"></p>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
