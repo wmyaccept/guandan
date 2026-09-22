@@ -10,7 +10,19 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-app.use(express.static(path.join(__dirname, "../public")));
+app.use((req, res, next) => {
+  if (req.path === "/" || req.path.endsWith(".html") || req.path.endsWith(".svg")) {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+  }
+  next();
+});
+app.use(express.static(path.join(__dirname, "../public"), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith(".html") || filePath.endsWith(".svg")) {
+      res.setHeader("Cache-Control", "no-store, max-age=0");
+    }
+  }
+}));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 attachSockets(io);

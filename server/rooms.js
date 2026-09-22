@@ -3,6 +3,8 @@ import { autoAct, createMatch, levelRankOf, playCards, passTurn, publicState, re
 
 const rooms = new Map();
 const socketRoom = new Map();
+const BOT_DELAY_MS = 2800;
+const TURN_LIMIT_MS = 30000;
 
 function randomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -30,7 +32,8 @@ function serializeRoom(room, socketId) {
     ),
     hostId: room.hostId,
     match: room.match ? publicState(room.match, seat >= 0 ? seat : null) : null,
-    you: seat
+    you: seat,
+    turnEndsAt: room.turnEndsAt ?? null
   };
 }
 
@@ -42,7 +45,7 @@ function broadcast(io, room) {
 }
 
 function namesOf(room) {
-  return room.seats.map((seat, index) => seat?.name ?? `空位${index + 1}`);
+  return room.seats.map((seat, index) => seat?.name ?? "\u7a7a\u4f4d" + (index + 1));
 }
 
 function botsOf(room) {
@@ -53,26 +56,56 @@ function filled(room) {
   return room.seats.every(Boolean);
 }
 
-export function attachSockets(io) {
-  const runBots = (room) => {
-    if (!room.match) return;
-    let guard = 0;
-    while (guard < 240) {
-      guard += 1;
-      const match = room.match;
-      const seat =
-        match.phase === "returnTribute"
-          ? match.returnsPlan[0]?.from
-          : match.phase === "play"
-            ? match.turn
-            : null;
-      if (seat == null) break;
-      if (!room.seats[seat]?.bot) break;
-      const result = autoAct(match, seat);
-      if (!result?.ok) break;
-    }
-  };
+function currentActor(match) {
+  if (!match) return null;
+  if (match.phase === "returnTribute") return match.returnsPlan[0]?.from ?? null;
+  if (match.phase === "play") return match.turn;
+  return null;
+}
 
+function clearRoomTimers(room) {
+  if (room.botTimer) clearTimeout(room.botTimer);
+  if (room.turnTimer) clearTimeout(room.turnTimer);
+  room.botTimer = null;
+  room.turnTimer = null;
+  room.turnEndsAt = null;
+}
+
+function nextToken(room) {
+  room.actionToken = (room.actionToken || 0) + 1;
+  return room.actionToken;
+}
+
+function scheduleAfterAction(io, room, delayMs = 0) {
+  clearRoomTimers(room);
+  broadcast(io, room);
+  const match = room.match;
+  const seat = currentActor(match);
+  if (seat == null) return;
+  const token = nextToken(room);
+  if (room.seats[seat]?.bot) {
+    const wait = Math.max(delayMs, BOT_DELAY_MS);
+    room.botTimer = setTimeout(() => {
+      if (room.actionToken !== token) return;
+      if (!room.match || currentActor(room.match) !== seat) return;
+      const result = autoAct(room.match, seat);
+      if (result?.ok) scheduleAfterAction(io, room, BOT_DELAY_MS);
+      else broadcast(io, room);
+    }, wait);
+    return;
+  }
+  room.turnEndsAt = Date.now() + TURN_LIMIT_MS;
+  broadcast(io, room);
+  room.turnTimer = setTimeout(() => {
+    if (room.actionToken !== token) return;
+    if (!room.match || currentActor(room.match) !== seat) return;
+    const result = autoAct(room.match, seat);
+    if (result?.ok) scheduleAfterAction(io, room, BOT_DELAY_MS);
+    else broadcast(io, room);
+  }, TURN_LIMIT_MS);
+}
+
+export function attachSockets(io) {
   io.on("connection", (socket) => {
     socket.on("create", ({ name }) => {
       const code = randomCode();
@@ -80,9 +113,10 @@ export function attachSockets(io) {
         code,
         hostId: socket.id,
         seats: [null, null, null, null],
-        match: null
+        match: null,
+        actionToken: 0
       };
-      room.seats[0] = { name: String(name || "玩家").slice(0, 12), socketId: socket.id, bot: false };
+      room.seats[0] = { name: String(name || "\u73a9\u5bb6").slice(0, 12), socketId: socket.id, bot: false };
       rooms.set(code, room);
       socketRoom.set(socket.id, code);
       socket.join(code);
@@ -91,13 +125,13 @@ export function attachSockets(io) {
 
     socket.on("join", ({ name, code }) => {
       const room = getRoom(code);
-      if (!room) return socket.emit("errorMessage", "房间不存在");
+      if (!room) return socket.emit("errorMessage", "\u623f\u95f4\u4e0d\u5b58\u5728");
       const existing = room.seats.findIndex((seat) => seat?.name === name && !seat.bot && !seat.socketId);
       const empty = room.seats.findIndex((seat) => !seat);
       const seat = existing >= 0 ? existing : empty;
-      if (seat < 0) return socket.emit("errorMessage", "房间已满");
+      if (seat < 0) return socket.emit("errorMessage", "\u623f\u95f4\u5df2\u6ee1");
       room.seats[seat] = {
-        name: String(name || `玩家${seat + 1}`).slice(0, 12),
+        name: String(name || "\u73a9\u5bb6" + (seat + 1)).slice(0, 12),
         socketId: socket.id,
         bot: false
       };
@@ -109,7 +143,7 @@ export function attachSockets(io) {
     socket.on("fillBots", () => {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;
-      const botNames = ["北风", "东风", "西风"];
+      const botNames = ["\u963f\u5f3a", "\u5c0f\u5468", "\u8001\u674e"];
       let n = 0;
       for (let i = 0; i < 4; i += 1) {
         if (!room.seats[i]) {
@@ -123,11 +157,10 @@ export function attachSockets(io) {
     socket.on("start", () => {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;
-      if (!filled(room)) return socket.emit("errorMessage", "满4人才能开局，空位可以加机器人");
+      if (!filled(room)) return socket.emit("errorMessage", "\u6ee14\u4eba\u624d\u80fd\u5f00\u5c40\uff0c\u7a7a\u4f4d\u53ef\u4ee5\u52a0\u673a\u5668\u4eba");
       room.match = createMatch(namesOf(room), { bots: botsOf(room) });
       startRound(room.match);
-      runBots(room);
-      broadcast(io, room);
+      scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
     socket.on("play", ({ cardIds }) => {
@@ -136,8 +169,7 @@ export function attachSockets(io) {
       const seat = room.seats.findIndex((item) => item?.socketId === socket.id);
       const result = playCards(room.match, seat, cardIds ?? []);
       if (!result.ok) return socket.emit("errorMessage", result.error);
-      runBots(room);
-      broadcast(io, room);
+      scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
     socket.on("pass", () => {
@@ -146,8 +178,7 @@ export function attachSockets(io) {
       const seat = room.seats.findIndex((item) => item?.socketId === socket.id);
       const result = passTurn(room.match, seat);
       if (!result.ok) return socket.emit("errorMessage", result.error);
-      runBots(room);
-      broadcast(io, room);
+      scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
     socket.on("returnTribute", ({ cardId }) => {
@@ -156,8 +187,7 @@ export function attachSockets(io) {
       const seat = room.seats.findIndex((item) => item?.socketId === socket.id);
       const result = returnTribute(room.match, seat, cardId);
       if (!result.ok) return socket.emit("errorMessage", result.error);
-      runBots(room);
-      broadcast(io, room);
+      scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
     socket.on("nextRound", () => {
@@ -165,8 +195,7 @@ export function attachSockets(io) {
       if (!room?.match) return;
       if (room.match.phase !== "roundOver") return;
       startRound(room.match);
-      runBots(room);
-      broadcast(io, room);
+      scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
     socket.on("hint", () => {
@@ -196,8 +225,10 @@ export function attachSockets(io) {
         if (seat?.socketId === socket.id) seat.socketId = null;
       }
       const alive = room.seats.some((seat) => seat?.socketId);
-      if (!alive) rooms.delete(room.code);
-      else broadcast(io, room);
+      if (!alive) {
+        clearRoomTimers(room);
+        rooms.delete(room.code);
+      } else broadcast(io, room);
     });
   });
 }

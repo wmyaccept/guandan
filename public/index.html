@@ -3,16 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0c4a34" />
+  <link rel="preload" as="image" href="/lobby-hero.jpg?v=7" />
   <title>掼蛋桌</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=7" />
 </head>
 <body>
   <div id="lobby" class="lobby">
-    <div class="lobby-copy">
-      <p class="kicker">四人两副牌</p>
-      <h1>掼蛋</h1>
-      <p class="sub">南北一家，东西一家。从 2 打到 A。</p>
-    </div>
+    <section class="lobby-scene">
+      <img class="lobby-hero" src="/lobby-hero.jpg?v=7" alt="" draggable="false" />
+      <div class="lobby-veil"></div>
+      <div class="lobby-copy">
+        <p class="kicker">四人两副牌</p>
+        <h1>掼蛋</h1>
+        <p class="sub">对家一队。从 2 打到 A。</p>
+      </div>
+    </section>
     <form id="entry" class="entry">
       <label>
         昵称
@@ -23,8 +29,14 @@
         <input id="code" maxlength="6" placeholder="加入时填写" autocomplete="off" />
       </label>
       <div class="entry-actions">
-        <button type="button" id="createBtn">开新桌</button>
-        <button type="button" id="joinBtn" class="ghost">加入</button>
+        <button type="button" id="createBtn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          开新桌
+        </button>
+        <button type="button" id="joinBtn" class="ghost">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>
+          加入
+        </button>
       </div>
       <p id="lobbyError" class="error"></p>
     </form>
@@ -32,9 +44,10 @@
 
   <div id="table" class="table hidden">
     <header class="topbar">
-      <div>
+      <div class="top-info">
         <span class="room" id="roomCode"></span>
         <span id="levelLine"></span>
+        <span id="clock" class="clock hidden"></span>
       </div>
       <div class="top-actions">
         <button type="button" id="botBtn">补机器人</button>
@@ -44,25 +57,30 @@
     </header>
 
     <section class="felt">
-      <article class="seat seat-top" data-view="2"></article>
-      <article class="seat seat-left" data-view="3"></article>
-      <article class="seat seat-right" data-view="1"></article>
-      <article class="seat seat-bottom" data-view="0"></article>
-      <div class="center">
-        <div id="trick" class="trick"></div>
-        <p id="banner" class="banner"></p>
+      <div class="board">
+        <article class="seat seat-top" data-view="2"></article>
+        <article class="seat seat-left" data-view="3"></article>
+        <article class="seat seat-right" data-view="1"></article>
+        <article class="seat seat-bottom" data-view="0"></article>
+        <div class="center">
+          <div id="trick" class="trick"></div>
+          <p id="banner" class="banner"></p>
+        </div>
       </div>
+        <footer class="dock">
+          <div class="hand-wrap">
+            <div id="selfStatus" class="self-status"></div>
+            <div id="hand" class="hand"></div>
+          </div>
+          <div class="play-actions">
+            <button type="button" id="groupBtn" class="ghost">组牌</button>
+            <button type="button" id="hintBtn" class="ghost">提示</button>
+            <button type="button" id="passBtn">不要</button>
+            <button type="button" id="playBtn">出牌</button>
+          </div>
+        </footer>
     </section>
 
-    <footer class="dock">
-      <div id="hand" class="hand"></div>
-      <div class="play-actions">
-        <button type="button" id="hintBtn" class="ghost">提示</button>
-        <button type="button" id="passBtn">不要</button>
-        <button type="button" id="playBtn">出牌</button>
-      </div>
-    </footer>
-    <aside id="log" class="log"></aside>
     <p id="toast" class="toast hidden"></p>
   </div>
 

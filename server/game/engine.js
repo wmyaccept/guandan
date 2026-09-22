@@ -12,7 +12,7 @@ import {
 import { canBeat, comboLabel, parseCombo } from "./combos.js";
 import { generatePlays } from "./moves.js";
 
-const TEAM_NAMES = ["南北", "东西"];
+const TEAM_NAMES = ["红队", "蓝队"];
 
 function teamOf(seat) {
   return seat % 2;
