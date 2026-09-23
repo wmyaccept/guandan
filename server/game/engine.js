@@ -11,6 +11,7 @@ import {
 } from "./cards.js";
 import { canBeat, comboLabel, parseCombo } from "./combos.js";
 import { generatePlays } from "./moves.js";
+import { chooseAction, chooseReturnCard } from "./ai.js";
 
 const TEAM_NAMES = ["红队", "蓝队"];
 
@@ -43,6 +44,7 @@ export function createMatch(names, options = {}) {
     hands: [[], [], [], []],
     lastHands: [[], [], [], []],
     finishOrder: [],
+    playedCards: [],
     current: null,
     leadSeat: 0,
     turn: 0,
@@ -177,7 +179,7 @@ function applyTribute(match) {
   }
 }
 
-function returnableCards(hand, levelRank) {
+export function returnableCards(hand, levelRank) {
   const modest = hand.filter((card) => card.rank >= 3 && card.rank <= 10 && !isHeartLevel(card, levelRank));
   if (modest.length) return modest;
   return hand.slice().sort((a, b) => compareCards(a, b, levelRank));
@@ -191,6 +193,7 @@ export function startRound(match, rng = Math.random) {
   match.roundResult = null;
   match.tributePlan = [];
   match.returnsPlan = [];
+  match.playedCards = [];
   match.current = null;
   match.lastPlay = null;
   match.lastPlays = [null, null, null, null];
@@ -306,7 +309,7 @@ function endRound(match) {
   }
 }
 
-export function playCards(match, seat, cardIds) {
+export function playCards(match, seat, cardIds, reason = "") {
   if (match.phase !== "play") return { ok: false, error: "还没轮到出牌" };
   if (match.turn !== seat) return { ok: false, error: "没轮到你" };
   const hand = match.hands[seat];
@@ -319,13 +322,16 @@ export function playCards(match, seat, cardIds) {
   if (!match.current && combo.cards.length === 0) return { ok: false, error: "必须出牌" };
 
   for (const id of cardIds) takeCard(hand, id);
+  if (!Array.isArray(match.playedCards)) match.playedCards = [];
+  for (const card of combo.cards) match.playedCards.push({ ...card });
   match.hands[seat] = sortHand(hand, levelRankOf(match));
   match.current = combo;
   match.lastPlay = { seat, combo };
   match.lastPlays[seat] = combo;
   match.passes = 0;
   match.leadSeat = seat;
-  addLog(match, `${match.names[seat]} 出 ${comboLabel(combo)} ${combo.cards.map(cardLabel).join(" ")}`);
+  const why = reason ? `（${reason}）` : "";
+  addLog(match, `${match.names[seat]} 出 ${comboLabel(combo)} ${combo.cards.map(cardLabel).join(" ")}${why}`);
 
   if (match.hands[seat].length === 0) {
     finishSeat(match, seat);
@@ -335,12 +341,12 @@ export function playCards(match, seat, cardIds) {
   return { ok: true };
 }
 
-export function passTurn(match, seat) {
+export function passTurn(match, seat, reason = "") {
   if (match.phase !== "play") return { ok: false, error: "还没轮到出牌" };
   if (match.turn !== seat) return { ok: false, error: "没轮到你" };
   if (!match.current) return { ok: false, error: "首出不能过" };
   match.lastPlays[seat] = { type: "pass", label: "过", cards: [] };
-  addLog(match, `${match.names[seat]} 不要`);
+  addLog(match, reason ? `${match.names[seat]} 不要（${reason}）` : `${match.names[seat]} 不要`);
   match.turn = nextSeatWithCards(match, seat);
   match.passes += 1;
 
@@ -395,19 +401,34 @@ export function autoAct(match, seat) {
   const levelRank = levelRankOf(match);
   if (match.phase === "returnTribute") {
     const allowed = returnableCards(match.hands[seat], levelRank);
-    return returnTribute(match, seat, allowed[0]?.id);
+    const pick = chooseReturnCard(match.hands[seat], allowed, levelRank);
+    return returnTribute(match, seat, (pick ?? allowed[0])?.id);
   }
   if (match.phase !== "play" || match.turn !== seat) return { ok: false };
-  const plays = generatePlays(match.hands[seat], levelRank, match.current);
-  const goingOut = plays.filter((combo) => combo.cards.length === match.hands[seat].length);
-  if (goingOut.length) return playCards(match, seat, goingOut[0].cards.map((card) => card.id));
+  const hand = match.hands[seat];
+  let decision = null;
+  try {
+    decision = chooseAction(match, seat, levelRank);
+  } catch {
+    decision = null;
+  }
+  if (decision?.action === "play" && decision.cardIds?.length) {
+    const result = playCards(match, seat, decision.cardIds, decision.reason);
+    if (result.ok) return result;
+  }
+  if (decision?.action === "pass" && match.current) return passTurn(match, seat, decision.reason);
+
+  // Safety net so the table never stalls if the planner finds nothing legal.
+  const plays = generatePlays(hand, levelRank, match.current);
+  const goingOut = plays.filter((combo) => combo.cards.length === hand.length);
+  if (goingOut.length) return playCards(match, seat, goingOut[0].cards.map((card) => card.id), "一把走完");
   if (!match.current) {
     const lead = plays[0];
     if (!lead) return { ok: false, error: "无牌可出" };
-    return playCards(match, seat, lead.cards.map((card) => card.id));
+    return playCards(match, seat, lead.cards.map((card) => card.id), "领出");
   }
-  const cheap = plays.filter((combo) => !combo.bombPower || match.hands[seat].length <= 8);
+  const cheap = plays.filter((combo) => !combo.bombPower || hand.length <= 8);
   const choice = cheap[0] ?? null;
-  if (!choice) return passTurn(match, seat);
-  return playCards(match, seat, choice.cards.map((card) => card.id));
+  if (!choice) return passTurn(match, seat, "压不住");
+  return playCards(match, seat, choice.cards.map((card) => card.id), "压上家");
 }

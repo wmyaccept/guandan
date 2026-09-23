@@ -1,5 +1,5 @@
-import { generatePlays } from "./game/moves.js";
-import { autoAct, createMatch, levelRankOf, playCards, passTurn, publicState, returnTribute, startRound } from "./game/engine.js";
+import { chooseReturnCard, suggestPlays } from "./game/ai.js";
+import { autoAct, createMatch, levelRankOf, playCards, passTurn, publicState, returnableCards, returnTribute, startRound } from "./game/engine.js";
 
 const rooms = new Map();
 const socketRoom = new Map();
@@ -207,13 +207,35 @@ export function attachSockets(io) {
       if (match.phase === "returnTribute") {
         const step = match.returnsPlan.find((item) => item.from === seat);
         if (!step) return;
-        socket.emit("hint", { cardIds: [match.hands[seat][0]?.id].filter(Boolean), action: "return" });
+        const allowed = returnableCards(match.hands[seat], levelRankOf(match));
+        const pick = chooseReturnCard(match.hands[seat], allowed, levelRankOf(match)) ?? allowed[0];
+        socket.emit("hint", { cardIds: pick ? [pick.id] : [], action: "return" });
         return;
       }
       if (match.phase !== "play" || match.turn !== seat) return;
-      const plays = generatePlays(match.hands[seat], levelRankOf(match), match.current);
-      if (!plays.length) return socket.emit("hint", { cardIds: [], action: "pass" });
-      socket.emit("hint", { cardIds: plays[0].cards.map((card) => card.id), action: "play" });
+      const options = suggestPlays(match, seat, levelRankOf(match));
+      if (!options.length) return socket.emit("hint", { cardIds: [], action: "pass" });
+      const key = [
+        match.round,
+        match.turn,
+        match.hands[seat].length,
+        match.passes,
+        (match.current?.cards ?? []).map((card) => card.id).sort().join(",")
+      ].join("|");
+      if (room.hintKey !== key) {
+        room.hintKey = key;
+        room.hintIndex = 0;
+      }
+      const index = room.hintIndex % options.length;
+      room.hintIndex = index + 1;
+      const pick = options[index];
+      socket.emit("hint", {
+        cardIds: pick.cardIds,
+        action: pick.action,
+        reason: pick.reason,
+        index: index + 1,
+        total: options.length
+      });
     });
 
     socket.on("disconnect", () => {

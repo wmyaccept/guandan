@@ -421,9 +421,12 @@ socket.on("errorMessage", (text) => {
   $("lobbyError").textContent = text;
   toast(text);
 });
-socket.on("hint", ({ cardIds, action }) => {
-  if (action === "pass") return toast("\u6ca1\u6709\u80fd\u538b\u7684\u724c\uff0c\u53ef\u4ee5\u4e0d\u8981");
+socket.on("hint", ({ cardIds, action, reason, index, total }) => {
+  if (action === "pass") {
+    return toast(reason || "\u6ca1\u6709\u80fd\u538b\u7684\u724c\uff0c\u53ef\u4ee5\u4e0d\u8981");
+  }
   selected.clear();
   for (const id of cardIds ?? []) selected.add(id);
   if (state) render(state);
+  if (reason) toast(total > 1 ? reason + " (" + index + "/" + total + ")" : reason);
 });
