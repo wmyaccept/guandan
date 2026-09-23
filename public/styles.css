@@ -271,6 +271,8 @@ input {
   align-content: center;
   gap: 12px;
 }
+.felt.no-scroll { overflow: hidden !important; }
+
 .trick {
   display: flex;
   gap: 10px;
@@ -484,4 +486,207 @@ input {
   .card, .hand .card, .pile .card { width: 62px; height: 132px; }
   .pile .card { flex-basis: 132px; }
   .card .corner strong { font-size: 18px; }
+}
+/* ---------------- 出牌特效 ---------------- */
+.fx {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.fx-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: fx-flash 0.72s ease-out forwards;
+}
+.fx-flash-bomb { background: radial-gradient(circle at 50% 46%, rgba(255, 176, 74, 0.5), rgba(255, 66, 20, 0.16) 46%, transparent 72%); }
+.fx-flash-flushstraight { background: radial-gradient(circle at 50% 46%, rgba(126, 255, 194, 0.46), rgba(24, 190, 120, 0.16) 48%, transparent 74%); }
+.fx-flash-jokerbomb { background: radial-gradient(circle at 50% 46%, rgba(255, 244, 200, 0.68), rgba(255, 92, 40, 0.26) 46%, transparent 76%); }
+
+.fx-shout {
+  position: absolute;
+  left: 50%;
+  top: 27%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 46px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #fff7dc;
+  text-shadow: 0 2px 0 #8a4416, 0 8px 26px rgba(0, 0, 0, 0.6);
+  animation: fx-shout 1.5s cubic-bezier(0.2, 0.9, 0.25, 1) forwards;
+}
+.fx-shout small {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #ffe9b8;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85);
+}
+.fx-shout-straight { color: #eaf6ff; text-shadow: 0 2px 0 #1d4f74, 0 8px 24px rgba(0, 0, 0, 0.55); }
+.fx-shout-pairseq { color: #f7ecd6; text-shadow: 0 2px 0 #6b4a1c, 0 8px 24px rgba(0, 0, 0, 0.55); }
+.fx-shout-tripleseq { color: #e9eff6; text-shadow: 0 2px 0 #38454f, 0 8px 24px rgba(0, 0, 0, 0.55); }
+.fx-shout-bomb,
+.fx-shout-flushstraight,
+.fx-shout-jokerbomb { font-size: 58px; }
+.fx-shout-flushstraight { color: #e9fff4; text-shadow: 0 0 20px rgba(70, 255, 176, 0.8), 0 6px 22px rgba(0, 0, 0, 0.6); }
+.fx-shout-jokerbomb { color: #fff; text-shadow: 0 0 24px rgba(255, 196, 74, 0.95), 0 0 48px rgba(255, 84, 40, 0.75), 0 6px 22px rgba(0, 0, 0, 0.6); }
+
+@keyframes fx-flash {
+  0% { opacity: 0; }
+  18% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes fx-shout {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-6deg); }
+  22% { opacity: 1; transform: translate(-50%, -50%) scale(1.18) rotate(2deg); }
+  36% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+  74% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -80%) scale(1.06); }
+}
+@keyframes fx-pop {
+  from { opacity: 0; transform: translateY(18px) scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fx-slide {
+  0% { opacity: 0; transform: translateX(-56px) rotate(-8deg); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fx-drop {
+  0% { opacity: 0; transform: translateY(-58px) rotate(6deg); }
+  62% { opacity: 1; transform: translateY(5px) rotate(-1deg) scale(0.98); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fx-slam {
+  0% { opacity: 0; transform: translateY(-80px) scale(1.22); }
+  58% { opacity: 1; transform: translateY(6px) scale(0.94); }
+  78% { opacity: 1; transform: translateY(-2px) scale(1.02); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fx-bomb-in {
+  0% { opacity: 0; transform: scale(0.4) rotate(-14deg); }
+  55% { opacity: 1; transform: scale(1.16) rotate(4deg); }
+  76% { opacity: 1; transform: scale(0.97) rotate(-1deg); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fx-joker-in {
+  0% { opacity: 0; transform: translateY(-42px) scale(0.5) rotate(180deg); }
+  70% { opacity: 1; transform: translateY(0) scale(1.1) rotate(-8deg); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes fx-sweep {
+  0% { opacity: 0; transform: translateX(-140%) skewX(-18deg); }
+  25% { opacity: 0.95; }
+  100% { opacity: 0; transform: translateX(260%) skewX(-18deg); }
+}
+@keyframes fx-shake-1 {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(-5px, 3px, 0); }
+  50% { transform: translate3d(5px, -3px, 0); }
+  75% { transform: translate3d(-3px, -2px, 0); }
+}
+@keyframes fx-shake-2 {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  15% { transform: translate3d(-10px, 5px, 0); }
+  32% { transform: translate3d(9px, -6px, 0); }
+  49% { transform: translate3d(-8px, -4px, 0); }
+  66% { transform: translate3d(7px, 4px, 0); }
+  83% { transform: translate3d(-4px, -2px, 0); }
+}
+@keyframes fx-shake-3 {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  10% { transform: translate3d(-15px, 7px, 0) rotate(-0.5deg); }
+  25% { transform: translate3d(14px, -8px, 0) rotate(0.5deg); }
+  40% { transform: translate3d(-12px, -6px, 0) rotate(-0.4deg); }
+  55% { transform: translate3d(11px, 6px, 0) rotate(0.4deg); }
+  70% { transform: translate3d(-7px, -4px, 0); }
+  85% { transform: translate3d(4px, 2px, 0); }
+}
+
+.board.shake-1 { animation: fx-shake-1 0.42s ease-in-out 1; }
+.board.shake-2 { animation: fx-shake-2 0.6s ease-in-out 1; }
+.board.shake-3 { animation: fx-shake-3 0.85s ease-in-out 1; }
+
+.trick .card { --i: 0; --g: 0; }
+
+.trick.fx-single .card,
+.trick.fx-pair .card,
+.trick.fx-triple .card,
+.trick.fx-fullhouse .card {
+  animation: fx-pop 0.3s cubic-bezier(0.2, 0.9, 0.25, 1) backwards;
+  animation-delay: calc(var(--i) * 45ms);
+}
+
+.trick.fx-straight .card {
+  animation: fx-slide 0.4s cubic-bezier(0.18, 0.9, 0.24, 1) backwards;
+  animation-delay: calc(var(--i) * 78ms);
+}
+
+.trick.fx-pairseq .card {
+  animation: fx-drop 0.42s cubic-bezier(0.22, 1.1, 0.36, 1) backwards;
+  animation-delay: calc(var(--g) * 155ms);
+}
+
+.trick.fx-tripleseq .card {
+  animation: fx-slam 0.46s cubic-bezier(0.2, 1.15, 0.3, 1) backwards;
+  animation-delay: calc(var(--g) * 175ms);
+  box-shadow: 0 0 0 2px rgba(190, 214, 235, 0.55), 0 0 18px rgba(150, 190, 225, 0.4), 0 10px 18px rgba(0, 0, 0, 0.3);
+}
+
+.trick.fx-bomb .card {
+  animation: fx-bomb-in 0.48s cubic-bezier(0.18, 1.25, 0.32, 1) backwards;
+  animation-delay: calc(var(--i) * 62ms);
+  box-shadow: 0 0 0 2px rgba(255, 158, 66, 0.6), 0 0 24px rgba(255, 106, 26, 0.55), 0 10px 18px rgba(0, 0, 0, 0.32);
+}
+
+.trick.fx-flushstraight .card {
+  overflow: hidden;
+  animation: fx-slide 0.42s cubic-bezier(0.18, 0.9, 0.24, 1) backwards;
+  animation-delay: calc(var(--i) * 72ms);
+  box-shadow: 0 0 0 2px rgba(126, 255, 194, 0.65), 0 0 26px rgba(38, 220, 140, 0.55), 0 10px 18px rgba(0, 0, 0, 0.32);
+}
+.trick.fx-flushstraight .card::after {
+  content: "";
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 46%;
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85), transparent);
+  animation-name: fx-sweep;
+  animation-duration: 1.15s;
+  animation-timing-function: ease-out;
+  animation-delay: calc(var(--i) * 72ms + 0.25s);
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+  pointer-events: none;
+}
+
+.trick.fx-jokerbomb .card {
+  animation: fx-joker-in 0.6s cubic-bezier(0.2, 1.2, 0.3, 1) backwards;
+  animation-delay: calc(var(--i) * 92ms);
+  box-shadow: 0 0 0 2px rgba(255, 226, 140, 0.85), 0 0 36px rgba(255, 122, 40, 0.8), 0 12px 22px rgba(0, 0, 0, 0.38);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-shout,
+  .fx-flash,
+  .trick .card,
+  .board.shake-1,
+  .board.shake-2,
+  .board.shake-3 { animation-duration: 0.01ms !important; }
+}
+
+@media (max-width: 760px) {
+  .fx-shout { font-size: 34px; letter-spacing: 2px; }
+  .fx-shout-bomb,
+  .fx-shout-flushstraight,
+  .fx-shout-jokerbomb { font-size: 42px; }
 }

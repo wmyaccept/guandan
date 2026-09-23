@@ -9,6 +9,8 @@ let stateQueue = [];
 let lastRevealAt = 0;
 let pumping = false;
 let clockTimer = null;
+let trickKey = "";
+let shakeTimer = null;
 
 const REVEAL_MS = 2200;
 const RANK = {
@@ -272,12 +274,88 @@ function bindHandDrag() {
   hand.addEventListener("pointercancel", finish);
 }
 
+const FX_INFO = {
+  straight: { text: "\u987a\u5b50", shake: 0, flash: false },
+  pairseq: { text: "\u6728\u677f", shake: 0, flash: false },
+  tripleseq: { text: "\u94a2\u677f", shake: 1, flash: false },
+  bomb: { text: "\u70b8\u5f39", shake: 2, flash: true },
+  flushstraight: { text: "\u540c\u82b1\u987a", shake: 2, flash: true },
+  jokerbomb: { text: "\u5929\u738b\u70b8", shake: 3, flash: true }
+};
+const FX_GROUP = { pairseq: 2, tripleseq: 3 };
+
+function trickKeyOf(match) {
+  const play = match?.lastPlay;
+  const combo = play?.combo;
+  if (!combo) return "";
+  return [match.round, play.seat, combo.type, combo.cards.map((card) => card.id).join(",")].join("|");
+}
+
+function shakeBoard(level) {
+  const board = document.querySelector(".board");
+  const felt = document.querySelector(".felt");
+  if (!board || !level) return;
+  const cls = "shake-" + Math.min(3, level);
+  board.classList.remove("shake-1", "shake-2", "shake-3");
+  void board.offsetWidth;
+  board.classList.add(cls);
+  if (felt) felt.classList.add("no-scroll");
+  clearTimeout(shakeTimer);
+  shakeTimer = setTimeout(() => {
+    board.classList.remove(cls);
+    if (felt) felt.classList.remove("no-scroll");
+  }, 950);
+}
+
+function playComboFx(combo, seat) {
+  const info = FX_INFO[combo.type];
+  const layer = $("fx");
+  if (!info || !layer) return;
+  if (info.flash) {
+    const flash = document.createElement("div");
+    flash.className = "fx-flash fx-flash-" + combo.type;
+    layer.append(flash);
+    setTimeout(() => flash.remove(), 850);
+  }
+  const shout = document.createElement("div");
+  shout.className = "fx-shout fx-shout-" + combo.type;
+  const text = combo.type === "bomb" && combo.cards.length > 4
+    ? combo.cards.length + "\u5f20" + info.text
+    : info.text;
+  shout.textContent = text + "\uff01";
+  const name = state?.match?.names?.[seat];
+  if (name) {
+    const who = document.createElement("small");
+    who.textContent = name;
+    shout.append(who);
+  }
+  layer.append(shout);
+  setTimeout(() => shout.remove(), 1700);
+  shakeBoard(info.shake);
+}
+
 function renderTrick(match) {
   const trick = $("trick");
-  trick.innerHTML = "";
   const combo = match?.lastPlay?.combo;
-  if (!combo) return;
-  for (const card of combo.cards) trick.append(renderCard(card, match.levelRank));
+  const key = trickKeyOf(match);
+  if (!combo) {
+    trickKey = key;
+    trick.className = "trick";
+    trick.innerHTML = "";
+    return;
+  }
+  if (key === trickKey) return;
+  trickKey = key;
+  trick.className = "trick fx-" + combo.type;
+  trick.innerHTML = "";
+  const group = FX_GROUP[combo.type] ?? 1;
+  combo.cards.forEach((card, index) => {
+    const node = renderCard(card, match.levelRank);
+    node.style.setProperty("--i", String(index));
+    node.style.setProperty("--g", String(Math.floor(index / group)));
+    trick.append(node);
+  });
+  playComboFx(combo, match.lastPlay.seat);
 }
 
 function renderClock(room) {
