@@ -1,4 +1,4 @@
-import { isHeartLevel, pointValue } from "./cards.js";
+import { isHeartLevel, pointValue, rankValue } from "./cards.js";
 import { TYPES, bombPower, comboLabel } from "./combos.js";
 import { generatePlays } from "./moves.js";
 
@@ -30,13 +30,6 @@ const W = {
   dumpEarly: 1.2,
   finishBias: 3
 };
-
-export function rankValue(rank, levelRank) {
-  if (rank === 17) return 18;
-  if (rank === 16) return 17;
-  if (rank === levelRank) return 16;
-  return rank;
-}
 
 function emptyPool() {
   const pool = Object.create(null);

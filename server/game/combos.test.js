@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { makeCard } from "./cards.js";
+import { LEVELS, makeCard, rankValue, sortHand } from "./cards.js";
 import { TYPES, canBeat, parseCombo, parseCombos } from "./combos.js";
 import { generatePlays } from "./moves.js";
 
@@ -89,5 +89,58 @@ test("generatePlays never repeats a wild inside one combo", () => {
   for (const combo of generatePlays(hand, 6)) {
     const ids = combo.cards.map((card) => card.id);
     assert.equal(new Set(ids).size, ids.length, combo.label);
+  }
+});
+
+test("level card outranks A and plain 2 is weakest", () => {
+  const level = 4;
+  const four = parseCombo(cards("S4"), level);
+  const queen = parseCombo(cards("SQ"), level);
+  const ace = parseCombo(cards("SA"), level);
+  const two = parseCombo(cards("S15"), level);
+  const three = parseCombo(cards("S3"), level);
+  assert.equal(canBeat(four, queen), true);
+  assert.equal(canBeat(queen, four), false);
+  assert.equal(canBeat(four, ace), true);
+  assert.equal(canBeat(two, three), false);
+  assert.equal(canBeat(three, two), true);
+  const fourBomb = parseCombo(cards("S4", "D4", "C4", "H4"), level);
+  const aceBomb = parseCombo(cards("SA", "HA", "DA", "CA"), level);
+  assert.equal(fourBomb.type, TYPES.BOMB);
+  assert.equal(canBeat(fourBomb, aceBomb), true);
+  assert.equal(canBeat(aceBomb, fourBomb), false);
+});
+
+test("hand sort keeps 2 lowest and level card above A", () => {
+  const hand = [
+    makeCard(0, "S", 15),
+    makeCard(1, "S", 14),
+    makeCard(2, "S", 4),
+    makeCard(3, "S", 3),
+    makeCard(4, "J", 16)
+  ];
+  const sorted = sortHand(hand, 4).map((card) => card.rank);
+  assert.deepEqual(sorted, [15, 3, 14, 4, 16]);
+});
+
+test("rank order holds for every level", () => {
+  const label = { 13: "K", 14: "A" };
+  for (const level of LEVELS) {
+    assert.equal(rankValue(level, level), 16);
+    for (let rank = 3; rank <= 15; rank += 1) {
+      if (rank === level) continue;
+      assert.equal(rankValue(rank, level), rank === 15 ? 2 : rank);
+    }
+    const victim = level === 14 ? 13 : 14;
+    const top = parseCombo(cards("S" + level), level);
+    const prey = parseCombo(cards("S" + label[victim]), level);
+    assert.equal(canBeat(top, prey), true);
+    assert.equal(canBeat(prey, top), false);
+    if (level !== 15) {
+      const three = parseCombo(cards("S3"), level);
+      const two = parseCombo(cards("S15"), level);
+      assert.equal(canBeat(three, two), true);
+      assert.equal(canBeat(two, three), false);
+    }
   }
 });

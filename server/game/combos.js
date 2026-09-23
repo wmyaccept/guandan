@@ -1,4 +1,4 @@
-import { isHeartLevel, isJoker, pointValue } from "./cards.js";
+import { isHeartLevel, isJoker, pointValue, rankValue } from "./cards.js";
 
 export const TYPES = {
   SINGLE: "single",
@@ -19,12 +19,30 @@ const TYPE_LABEL = {
   [TYPES.TRIPLE]: "三张",
   [TYPES.FULL_HOUSE]: "三带二",
   [TYPES.STRAIGHT]: "顺子",
-  [TYPES.PAIR_SEQ]: "连对",
+  [TYPES.PAIR_SEQ]: "木板",
   [TYPES.TRIPLE_SEQ]: "钢板",
   [TYPES.BOMB]: "炸弹",
   [TYPES.FLUSH_STRAIGHT]: "同花顺",
   [TYPES.JOKER_BOMB]: "天王炸"
 };
+
+const RUN_TYPES = new Set([
+  TYPES.STRAIGHT,
+  TYPES.PAIR_SEQ,
+  TYPES.TRIPLE_SEQ,
+  TYPES.FLUSH_STRAIGHT
+]);
+
+// Runs keep their natural top card for comparison; every other combo uses the
+// level-aware order so a level card outranks A and a plain 2 stays weakest.
+function compareValue(item, levelRank) {
+  if (RUN_TYPES.has(item.type)) return item.rank;
+  return rankValue(item.rank, levelRank);
+}
+
+function comboValueOf(item) {
+  return item.value ?? item.rank;
+}
 
 function cloneCounts() {
   const counts = Object.create(null);
@@ -224,6 +242,7 @@ export function parseCombos(cards, levelRank) {
     const naturalCards = cards.filter((_, index) => !wildSet.has(index));
     const wilds = wildSet.size;
     for (const item of interpretationsForSplit(cards, naturalCards, wilds)) {
+      item.value = compareValue(item, levelRank);
       const key = `${item.type}-${item.rank}-${item.length}-${item.bombPower}`;
       if (!unique.has(key)) unique.set(key, item);
     }
@@ -241,7 +260,7 @@ export function parseCombo(cards, levelRank, preferredType = null) {
   return found.slice().sort((a, b) => {
     if (a.bombPower !== b.bombPower) return b.bombPower - a.bombPower;
     if (a.type !== b.type) return a.type.localeCompare(b.type);
-    return b.rank - a.rank;
+    return comboValueOf(b) - comboValueOf(a);
   })[0];
 }
 
@@ -260,13 +279,13 @@ export function canBeat(next, current) {
   const currentBomb = bombPower(current);
   if (nextBomb && currentBomb) {
     if (nextBomb !== currentBomb) return nextBomb > currentBomb;
-    return next.rank > current.rank;
+    return comboValueOf(next) > comboValueOf(current);
   }
   if (nextBomb) return true;
   if (currentBomb) return false;
   if (next.type !== current.type) return false;
   if (next.length !== current.length) return false;
-  return next.rank > current.rank;
+  return comboValueOf(next) > comboValueOf(current);
 }
 
 export function legalPlays(hand, levelRank, current) {

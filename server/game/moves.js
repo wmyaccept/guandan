@@ -163,6 +163,6 @@ export function generatePlays(hand, levelRank, current = null) {
     const bombDiff = bombPower(a) - bombPower(b);
     if (bombDiff !== 0) return bombDiff;
     if (a.length !== b.length) return a.length - b.length;
-    return a.rank - b.rank;
+    return (a.value ?? a.rank) - (b.value ?? b.rank);
   });
 }

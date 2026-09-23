@@ -73,12 +73,18 @@ export function sequenceRank(card) {
   return null;
 }
 
+// Guandan order from weak to strong: 2, 3..K, A, level card, small joker,
+// big joker. The level card is promoted above A; a plain 2 is the weakest.
+export function rankValue(rank, levelRank) {
+  if (rank === 17) return 18;
+  if (rank === 16) return 17;
+  if (rank === levelRank) return 16;
+  if (rank === 15) return 2;
+  return rank;
+}
+
 export function pointValue(card, levelRank) {
-  if (card.rank === 17) return 18;
-  if (card.rank === 16) return 17;
-  if (card.rank === levelRank) return 16;
-  if (card.rank === 15) return 15;
-  return card.rank;
+  return rankValue(card.rank, levelRank);
 }
 
 export function compareCards(a, b, levelRank) {
