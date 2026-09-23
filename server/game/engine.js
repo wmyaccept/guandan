@@ -313,6 +313,7 @@ export function playCards(match, seat, cardIds, reason = "") {
   if (match.phase !== "play") return { ok: false, error: "还没轮到出牌" };
   if (match.turn !== seat) return { ok: false, error: "没轮到你" };
   const hand = match.hands[seat];
+  if (new Set(cardIds).size !== cardIds.length) return { ok: false, error: "\u91cd\u590d\u7684\u724c" };
   const cards = cardIds.map((id) => hand.find((card) => card.id === id)).filter(Boolean);
   if (cards.length !== cardIds.length) return { ok: false, error: "手里没有这些牌" };
   const preferred = match.current && !match.current.bombPower ? match.current.type : null;

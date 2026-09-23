@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { makeCard } from "./cards.js";
 import { TYPES, canBeat, parseCombo, parseCombos } from "./combos.js";
+import { generatePlays } from "./moves.js";
 
 function cards(...specs) {
   return specs.map((spec, index) => {
@@ -69,4 +70,24 @@ test("same type must be longer equal and higher", () => {
 test("parseCombos can read wilds as themselves", () => {
   const found = parseCombos(cards("H5", "S5"), 5);
   assert.ok(found.some((item) => item.type === TYPES.PAIR && item.rank === 5));
+});
+
+
+test("pair sequence and steel plate are exactly six cards", () => {
+  const longPairs = parseCombo(cards("S3", "H3", "S4", "H4", "S5", "H5", "S6", "H6"), 15);
+  assert.equal(longPairs, null);
+  const longPlate = parseCombo(cards("S3", "H3", "D3", "S4", "H4", "D4", "S5", "H5", "D5"), 15);
+  assert.equal(longPlate, null);
+  const pairs = parseCombo(cards("S3", "H3", "S4", "H4", "S5", "H5"), 15);
+  assert.equal(pairs.type, TYPES.PAIR_SEQ);
+  const plate = parseCombo(cards("S6", "H6", "D6", "S7", "H7", "D7"), 15);
+  assert.equal(plate.type, TYPES.TRIPLE_SEQ);
+});
+
+test("generatePlays never repeats a wild inside one combo", () => {
+  const hand = [makeCard(0, "C", 6), makeCard(1, "C", 6), makeCard(0, "H", 6), makeCard(0, "S", 9)];
+  for (const combo of generatePlays(hand, 6)) {
+    const ids = combo.cards.map((card) => card.id);
+    assert.equal(new Set(ids).size, ids.length, combo.label);
+  }
 });

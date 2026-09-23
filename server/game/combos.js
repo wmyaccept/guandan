@@ -198,11 +198,11 @@ function interpretationsForSplit(cards, naturalCards, wilds) {
   add(trySameRank(cards, counts, wilds, 3, TYPES.TRIPLE));
   add(tryFullHouse(cards, counts, wilds));
   add(tryRun(cards, counts, wilds, 1, 5, TYPES.STRAIGHT));
-  if (cards.length >= 6 && cards.length % 2 === 0) {
-    add(tryRun(cards, counts, wilds, 2, cards.length / 2, TYPES.PAIR_SEQ));
-  }
-  if (cards.length >= 6 && cards.length % 3 === 0) {
-    add(tryRun(cards, counts, wilds, 3, cards.length / 3, TYPES.TRIPLE_SEQ));
+  // House rule: pair sequences are exactly three pairs and steel plates
+  // exactly two triples, so both shapes are six cards and nothing longer.
+  if (cards.length === 6) {
+    add(tryRun(cards, counts, wilds, 2, 3, TYPES.PAIR_SEQ));
+    add(tryRun(cards, counts, wilds, 3, 2, TYPES.TRIPLE_SEQ));
   }
   add(tryFlushStraight(cards, counts, wilds, naturalCards));
   add(tryBomb(cards, counts, wilds));

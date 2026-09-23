@@ -202,8 +202,8 @@ function buildPlan(hand, levelRank, flushFirst) {
     takeWildBombs();
     takeFlushStraights();
   }
-  takeRuns(3, 2, 4, TYPES.TRIPLE_SEQ);
-  takeRuns(2, 3, 6, TYPES.PAIR_SEQ);
+  takeRuns(3, 2, 2, TYPES.TRIPLE_SEQ);
+  takeRuns(2, 3, 3, TYPES.PAIR_SEQ);
   takeRuns(1, 5, 5, TYPES.STRAIGHT);
   takeFullHouses();
   takeLeftovers();

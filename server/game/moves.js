@@ -12,15 +12,19 @@ function byRankMap(hand) {
 
 function takeCards(byRank, wilds, rank, n, used) {
   const picked = [];
+  const pickedIds = new Set();
   for (const card of byRank[rank] ?? []) {
     if (picked.length >= n) break;
     if (used.has(card.id)) continue;
     picked.push(card);
+    pickedIds.add(card.id);
   }
+  // Wilds also sit in byRank, so skip any wild already picked above.
   for (const card of wilds) {
     if (picked.length >= n) break;
-    if (used.has(card.id)) continue;
+    if (used.has(card.id) || pickedIds.has(card.id)) continue;
     picked.push(card);
+    pickedIds.add(card.id);
   }
   if (picked.length < n) return null;
   return picked;
@@ -117,7 +121,8 @@ export function generatePlays(hand, levelRank, current = null) {
     }
   }
 
-  for (let run = 3; run <= 6; run += 1) {
+  // House rule: a pair sequence is exactly three pairs (six cards).
+  for (let run = 3; run <= 3; run += 1) {
     for (let start = 3; start <= 15 - run; start += 1) {
       const used = new Set();
       const cards = [];
@@ -135,7 +140,8 @@ export function generatePlays(hand, levelRank, current = null) {
     }
   }
 
-  for (let run = 2; run <= 4; run += 1) {
+  // House rule: a steel plate is exactly two triples (six cards).
+  for (let run = 2; run <= 2; run += 1) {
     for (let start = 3; start <= 15 - run; start += 1) {
       const used = new Set();
       const cards = [];
