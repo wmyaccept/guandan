@@ -53,6 +53,8 @@ export function createMatch(names, options = {}) {
     lastPlays: [null, null, null, null],
     tributePlan: [],
     returnsPlan: [],
+    tributeRefused: [],
+    tributeSummary: [],
     roundResult: null,
     nextLead: 0,
     history: []
@@ -89,8 +91,14 @@ function highestCard(hand, levelRank) {
   return hand.slice().sort((a, b) => compareCards(a, b, levelRank)).at(-1);
 }
 
-function hasDoubleBigJoker(hand) {
-  return hand.filter((card) => card.rank === 17).length >= 2;
+function bigJokerCount(hand) {
+  return hand.filter((card) => card.rank === 17).length;
+}
+
+// 逢人配（红桃级牌）不作为贡牌，改取次大的牌
+function tributeCard(hand, levelRank) {
+  const pool = hand.filter((card) => !isHeartLevel(card, levelRank));
+  return highestCard(pool.length ? pool : hand, levelRank);
 }
 
 function takeCard(hand, cardId) {
@@ -130,43 +138,44 @@ function beginPlay(match, leadSeat, reason) {
   addLog(match, reason);
 }
 
-function buildTribute(match) {
+export function buildTribute(match) {
   const finish = match.finishOrder;
   const kind = upgradeFor(finish).kind;
+  const levelRank = levelRankOf(match);
   match.tributePlan = [];
   match.returnsPlan = [];
-  if (kind === "双下") return false;
+  match.tributeRefused = [];
 
   const head = finish[0];
-  const last = finish[3];
-  const levelRank = levelRankOf(match);
+  const winTeam = teamOf(head);
+  // 负方按名次排列：双下时两人都进贡，其余只由负方最后一名进贡
+  const losers = finish.filter((seat) => teamOf(seat) !== winTeam);
+  const payers = kind === "双下" ? losers : [losers.at(-1)];
+  const receivers = kind === "双下" ? [head, finish[1]] : [head];
 
-  if (kind === "头三") {
-    if (hasDoubleBigJoker(match.hands[last])) {
-      addLog(match, `${match.names[last]} 双大王抗贡`);
-      return false;
-    }
-    match.tributePlan.push({ from: last, to: head, cardId: highestCard(match.hands[last], levelRank).id });
-    return true;
+  // 抗贡：进贡方合计握有两张大王（双下时允许一人一张）
+  const jokers = payers.reduce((sum, seat) => sum + bigJokerCount(match.hands[seat]), 0);
+  if (jokers >= 2) {
+    match.tributeRefused = payers.slice();
+    const refusedNames = payers.map((seat) => match.names[seat]).join("、");
+    addLog(match, `${refusedNames} 双大王抗贡`);
+    match.tributeSummary = [`${refusedNames} 手握双大王，抗贡成功，本局不进贡`];
+    return false;
   }
 
-  const midA = finish[1];
-  const midB = finish[2];
-  const givers = [midA, midB].filter((seat) => !hasDoubleBigJoker(match.hands[seat]));
-  for (const seat of [midA, midB]) {
-    if (!givers.includes(seat)) addLog(match, `${match.names[seat]} 双大王抗贡`);
-  }
-  if (!givers.length) return false;
-  const gifts = givers
-    .map((seat) => ({ from: seat, card: highestCard(match.hands[seat], levelRank) }))
+  const gifts = payers
+    .map((seat) => ({ from: seat, card: tributeCard(match.hands[seat], levelRank) }))
+    .filter((gift) => gift.card)
     .sort((a, b) => compareCards(a.card, b.card, levelRank));
-  const high = gifts.at(-1);
-  match.tributePlan.push({ from: high.from, to: head, cardId: high.card.id });
-  if (gifts.length > 1) {
-    const low = gifts[0];
-    match.tributePlan.push({ from: low.from, to: last, cardId: low.card.id });
+  if (!gifts.length) return false;
+
+  // 大贡给头游，小贡给二游
+  const big = gifts.at(-1);
+  match.tributePlan.push({ from: big.from, to: receivers[0], cardId: big.card.id });
+  if (gifts.length > 1 && receivers.length > 1) {
+    match.tributePlan.push({ from: gifts[0].from, to: receivers[1], cardId: gifts[0].card.id });
   }
-  return match.tributePlan.length > 0;
+  return true;
 }
 
 function applyTribute(match) {
@@ -174,7 +183,9 @@ function applyTribute(match) {
     const card = takeCard(match.hands[step.from], step.cardId);
     if (!card) continue;
     giveCard(match, step.from, step.to, card);
-    addLog(match, `${match.names[step.from]} 进贡 ${cardLabel(card)} 给 ${match.names[step.to]}`);
+    const text = `${match.names[step.from]} 进贡 ${cardLabel(card)} 给 ${match.names[step.to]}`;
+    addLog(match, text);
+    match.tributeSummary.push(text);
     match.returnsPlan.push({ from: step.to, to: step.from });
   }
 }
@@ -193,6 +204,8 @@ export function startRound(match, rng = Math.random) {
   match.roundResult = null;
   match.tributePlan = [];
   match.returnsPlan = [];
+  match.tributeRefused = [];
+  match.tributeSummary = [];
   match.playedCards = [];
   match.current = null;
   match.lastPlay = null;
@@ -238,7 +251,9 @@ export function returnTribute(match, seat, cardId) {
   if (!card) return { ok: false, error: "没有可还的牌" };
   const taken = takeCard(match.hands[seat], card.id);
   giveCard(match, seat, step.to, taken);
-  addLog(match, `${match.names[seat]} 还贡 ${cardLabel(taken)} 给 ${match.names[step.to]}`);
+  const text = `${match.names[seat]} 还贡 ${cardLabel(taken)} 给 ${match.names[step.to]}`;
+  addLog(match, text);
+  match.tributeSummary.push(text);
   match.returnsPlan = match.returnsPlan.filter((item) => item.from !== seat);
   if (!match.returnsPlan.length) {
     beginPlay(match, match.nextLead, `${match.names[match.nextLead]} 还贡完毕，先出`);
@@ -390,6 +405,8 @@ export function publicState(match, viewerSeat = null) {
     hand: viewerSeat == null ? [] : match.hands[viewerSeat],
     returnsPlan: match.returnsPlan,
     tributePlan: match.tributePlan,
+    tributeRefused: match.tributeRefused ?? [],
+    tributeSummary: match.tributeSummary ?? [],
     roundResult: match.roundResult,
     winnerTeam: match.winnerTeam,
     log: match.log.slice(-12),

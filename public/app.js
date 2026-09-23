@@ -305,6 +305,7 @@ function stateKey(room) {
   return [
     match.phase,
     match.turn,
+    (match.tributeSummary ?? []).length,
     match.log?.at(-1) || "",
     (match.handsCount || []).join("-"),
     match.lastPlay?.combo?.label || "",
@@ -359,6 +360,7 @@ function render(room) {
     $("levelLine").textContent = "\u7b49\u5f85\u5f00\u5c40";
   }
   $("banner").textContent = bannerText(room);
+  renderNotice(match);
     $("startBtn").classList.toggle("hidden", Boolean(match) && match.phase !== "matchOver");
   $("nextBtn").classList.toggle("hidden", match?.phase !== "roundOver");
   $("botBtn").classList.toggle("hidden", Boolean(match) && match.phase !== "matchOver");
@@ -376,6 +378,29 @@ function render(room) {
   renderClock(room);
 }
 
+function renderNotice(match) {
+  const el = $("notice");
+  if (!el) return;
+  const lines = (match?.tributeSummary ?? []).slice(-3);
+  el.textContent = "";
+  if (!lines.length) {
+    el.classList.add("hidden");
+    return;
+  }
+  for (const line of lines) {
+    const span = document.createElement("span");
+    span.textContent = line;
+    el.append(span);
+  }
+  if (match.phase === "returnTribute" && match.turn === you) {
+    const tip = document.createElement("span");
+    tip.className = "notice-tip";
+    tip.textContent = "\u9009\u4e00\u5f20\u724c\u70b9\u201c\u8fd8\u8d21\u201d\uff0c\u4e0d\u9009\u5219\u81ea\u52a8\u8fd8\u5c0f\u724c";
+    el.append(tip);
+  }
+  el.classList.remove("hidden");
+}
+
 function bannerText(room) {
   const match = room.match;
   if (!match) return "\u6ee14\u4eba\u540e\u5f00\u5c40\uff0c\u7a7a\u4f4d\u53ef\u8865\u673a\u5668\u4eba";
@@ -384,7 +409,9 @@ function bannerText(room) {
     return match.winnerTeam === you % 2 ? "\u6211\u65b9\u8fc7A\u80dc\u51fa" : "\u5bf9\u5bb6\u8fc7A\u80dc\u51fa";
   }
   if (match.phase === "roundOver") return match.roundResult?.kind ?? "\u672c\u5c40\u7ed3\u675f";
-  if (match.phase === "returnTribute") return match.names[match.turn] + " \u8fd8\u8d21";
+  if (match.phase === "returnTribute") {
+    return match.turn === you ? "\u8f6e\u5230\u4f60\u8fd8\u8d21" : match.names[match.turn] + " \u8fd8\u8d21";
+  }
   if (match.current) return match.names[match.lastPlay.seat] + " \u51fa\u4e86 " + match.current.label;
   return match.names[match.turn] + " \u51fa\u724c";
 }

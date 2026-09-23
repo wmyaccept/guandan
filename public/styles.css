@@ -281,6 +281,25 @@ input {
 }
 .banner { margin: 0; font-size: 20px; text-shadow: 0 2px 12px #000; }
 
+.notice {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  max-width: min(560px, 84vw);
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 214, 130, 0.38);
+  border-radius: 8px;
+  background: rgba(24, 16, 9, 0.74);
+  color: #ffe9b8;
+  font-size: 13px;
+  line-height: 1.55;
+  text-shadow: 0 1px 4px #000;
+}
+
+.notice .notice-tip { color: #ffd682; font-weight: 600; }
+
 .dock {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
