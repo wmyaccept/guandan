@@ -5,6 +5,7 @@ const rooms = new Map();
 const socketRoom = new Map();
 const BOT_DELAY_MS = 2800;
 const TURN_LIMIT_MS = 30000;
+const ROOM_GRACE_MS = 10 * 60 * 1000;
 
 function randomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -17,19 +18,45 @@ function getRoom(code) {
   return rooms.get(String(code || "").trim().toUpperCase());
 }
 
+// A refresh can reconnect before the server notices the old transport died,
+// so a seat still held by an unknown socket counts as reclaimable.
+function isLive(io, socketId) {
+  if (!socketId) return false;
+  const pool = io && io.sockets && io.sockets.sockets;
+  if (!pool) return false;
+  return typeof pool.has === "function" ? pool.has(socketId) : Boolean(pool[socketId]);
+}
+
+function clientToken(token) {
+  return typeof token === "string" && token.length >= 8 && token.length <= 64 ? token : null;
+}
+
+// The previous holder can still look connected after a crash or a mobile tab
+// kill, so drop it to hand the seat back to the returning player.
+function dropStaleSocket(io, prev, keepId) {
+  const stale = prev && prev.socketId;
+  if (!stale || stale === keepId) return;
+  socketRoom.delete(stale);
+  const pool = io && io.sockets && io.sockets.sockets;
+  const old = pool && typeof pool.get === "function" ? pool.get(stale) : null;
+  if (old && typeof old.disconnect === "function") old.disconnect(true);
+}
+
+function seatView(item) {
+  if (!item) return null;
+  return {
+    name: item.name,
+    bot: item.bot,
+    hosted: Boolean(item.hosted),
+    connected: item.bot || Boolean(item.socketId)
+  };
+}
+
 function serializeRoom(room, socketId) {
   const seat = room.seats.findIndex((item) => item?.socketId === socketId);
   return {
     code: room.code,
-    seats: room.seats.map((item) =>
-      item
-        ? {
-            name: item.name,
-            bot: item.bot,
-            connected: item.bot || Boolean(item.socketId)
-          }
-        : null
-    ),
+    seats: room.seats.map(seatView),
     hostId: room.hostId,
     match: room.match ? publicState(room.match, seat >= 0 ? seat : null) : null,
     you: seat,
@@ -71,6 +98,27 @@ function clearRoomTimers(room) {
   room.turnEndsAt = null;
 }
 
+function cancelRoomCleanup(room) {
+  if (room.graceTimer) clearTimeout(room.graceTimer);
+  room.graceTimer = null;
+}
+
+function scheduleRoomCleanup(room) {
+  cancelRoomCleanup(room);
+  room.graceTimer = setTimeout(() => {
+    room.graceTimer = null;
+    if (room.seats.some((seat) => seat?.socketId)) return;
+    clearRoomTimers(room);
+    rooms.delete(room.code);
+  }, ROOM_GRACE_MS);
+}
+
+function resumeIfIdle(io, room) {
+  if (!room.match || room.botTimer || room.turnTimer) return;
+  if (currentActor(room.match) == null) return;
+  scheduleAfterAction(io, room, BOT_DELAY_MS);
+}
+
 function nextToken(room) {
   room.actionToken = (room.actionToken || 0) + 1;
   return room.actionToken;
@@ -107,37 +155,105 @@ function scheduleAfterAction(io, room, delayMs = 0) {
 
 export function attachSockets(io) {
   io.on("connection", (socket) => {
-    socket.on("create", ({ name }) => {
+    socket.on("create", ({ name, token } = {}) => {
       const code = randomCode();
       const room = {
         code,
         hostId: socket.id,
         seats: [null, null, null, null],
         match: null,
-        actionToken: 0
+        actionToken: 0,
+        graceTimer: null
       };
-      room.seats[0] = { name: String(name || "\u73a9\u5bb6").slice(0, 12), socketId: socket.id, bot: false };
+      room.seats[0] = {
+        name: String(name || "\u73a9\u5bb6").slice(0, 12),
+        socketId: socket.id,
+        bot: false,
+        token: clientToken(token)
+      };
       rooms.set(code, room);
       socketRoom.set(socket.id, code);
       socket.join(code);
       broadcast(io, room);
     });
 
-    socket.on("join", ({ name, code }) => {
+    socket.on("join", ({ name, code, token } = {}) => {
       const room = getRoom(code);
       if (!room) return socket.emit("errorMessage", "\u623f\u95f4\u4e0d\u5b58\u5728");
-      const existing = room.seats.findIndex((seat) => seat?.name === name && !seat.bot && !seat.socketId);
+      cancelRoomCleanup(room);
+      const wanted = String(name || "").slice(0, 12);
+      const mine = clientToken(token);
+      const byToken = mine ? room.seats.findIndex((seat) => seat && seat.token === mine) : -1;
+      const byName = room.seats.findIndex(
+        (seat) =>
+          seat &&
+          seat.name === wanted &&
+          (seat.hosted || !seat.bot) &&
+          !isLive(io, seat.socketId)
+      );
       const empty = room.seats.findIndex((seat) => !seat);
-      const seat = existing >= 0 ? existing : empty;
+      const seat = byToken >= 0 ? byToken : byName >= 0 ? byName : empty;
       if (seat < 0) return socket.emit("errorMessage", "\u623f\u95f4\u5df2\u6ee1");
+      const prev = room.seats[seat];
       room.seats[seat] = {
         name: String(name || "\u73a9\u5bb6" + (seat + 1)).slice(0, 12),
         socketId: socket.id,
-        bot: false
+        bot: false,
+        hosted: false,
+        token: mine || prev?.token || null
       };
+      dropStaleSocket(io, prev, socket.id);
       socketRoom.set(socket.id, room.code);
       socket.join(room.code);
       broadcast(io, room);
+      resumeIfIdle(io, room);
+    });
+
+    socket.on("sit", ({ seat } = {}) => {
+      const room = getRoom(socketRoom.get(socket.id));
+      if (!room) return;
+      if (room.match) return socket.emit("errorMessage", "\u5f00\u5c40\u540e\u4e0d\u80fd\u6362\u5ea7\u4f4d");
+      const index = Number(seat);
+      if (!Number.isInteger(index) || index < 0 || index > 3) return socket.emit("errorMessage", "\u5ea7\u4f4d\u65e0\u6548");
+      const from = room.seats.findIndex((item) => item?.socketId === socket.id);
+      if (from < 0 || from === index) return;
+      const target = room.seats[index];
+      if (target && !target.bot) return socket.emit("errorMessage", "\u8be5\u5ea7\u4f4d\u5df2\u6709\u73a9\u5bb6");
+      room.seats[index] = {
+        name: room.seats[from].name,
+        socketId: socket.id,
+        bot: false,
+        hosted: false,
+        token: room.seats[from].token || null
+      };
+      room.seats[from] = null;
+      broadcast(io, room);
+    });
+
+    socket.on("leave", () => {
+      const code = socketRoom.get(socket.id);
+      socketRoom.delete(socket.id);
+      const room = getRoom(code);
+      if (!room) return;
+      if (typeof socket.leave === "function") socket.leave(room.code);
+      const seat = room.seats.findIndex((item) => item?.socketId === socket.id);
+      if (seat >= 0) {
+        const inMatch = Boolean(room.match) && room.match.phase !== "matchOver";
+        room.seats[seat] = inMatch
+          ? { ...room.seats[seat], socketId: null, bot: true, hosted: true }
+          : null;
+        if (room.hostId === socket.id) {
+          const next = room.seats.find((item) => item?.socketId);
+          room.hostId = next ? next.socketId : null;
+        }
+      }
+      if (room.seats.some((item) => item?.socketId)) {
+        broadcast(io, room);
+        resumeIfIdle(io, room);
+      } else {
+        clearRoomTimers(room);
+        scheduleRoomCleanup(room);
+      }
     });
 
     socket.on("fillBots", () => {
@@ -249,8 +365,11 @@ export function attachSockets(io) {
       const alive = room.seats.some((seat) => seat?.socketId);
       if (!alive) {
         clearRoomTimers(room);
-        rooms.delete(room.code);
-      } else broadcast(io, room);
+        scheduleRoomCleanup(room);
+      } else {
+        broadcast(io, room);
+        resumeIfIdle(io, room);
+      }
     });
   });
 }

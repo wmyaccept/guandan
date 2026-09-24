@@ -11,6 +11,10 @@ let pumping = false;
 let clockTimer = null;
 let trickKey = "";
 let shakeTimer = null;
+let pendingReconnect = false;
+let myTurnSeen = false;
+let renderEpoch = 0;
+let audioCtx = null;
 
 const REVEAL_MS = 2200;
 const RANK = {
@@ -23,6 +27,118 @@ const SUIT = { S: "\u2660", H: "\u2665", D: "\u2666", C: "\u2663", J: "\u738b" }
 
 const savedName = localStorage.getItem("guandan-name") || "";
 $("name").value = savedName || ("\u73a9\u5bb6" + Math.floor(Math.random() * 90 + 10));
+
+const SESSION_KEY = "guandan-session";
+const TOKEN_KEY = "guandan-token";
+const ZOOM_KEY = "guandan-zoom";
+const SOUND_KEY = "guandan-sound";
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 1.6;
+const ZOOM_STEP = 0.1;
+
+function clampZoom(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(n * 10) / 10));
+}
+
+let zoom = clampZoom(localStorage.getItem(ZOOM_KEY) || 1);
+let soundOn = localStorage.getItem(SOUND_KEY) !== "off";
+
+function applyZoom() {
+  document.documentElement.style.setProperty("--zoom", String(zoom));
+  $("zoomOutBtn").disabled = zoom <= ZOOM_MIN;
+  $("zoomInBtn").disabled = zoom >= ZOOM_MAX;
+}
+
+function setZoom(value) {
+  zoom = clampZoom(value);
+  localStorage.setItem(ZOOM_KEY, String(zoom));
+  applyZoom();
+}
+
+function applySound() {
+  $("soundBtn").classList.toggle("muted", !soundOn);
+  $("soundBtn").setAttribute("aria-pressed", soundOn ? "true" : "false");
+}
+
+// Stable per browser so a reload can claim the very same seat back,
+// even when the server has not noticed the old connection die yet.
+function deviceToken() {
+  let token = null;
+  try {
+    token = localStorage.getItem(TOKEN_KEY);
+  } catch {}
+  if (!token) {
+    token = window.crypto?.randomUUID
+      ? window.crypto.randomUUID()
+      : "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+    try {
+      localStorage.setItem(TOKEN_KEY, token);
+    } catch {}
+  }
+  return token;
+}
+
+function readSession() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    return raw && raw.code ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(code, name) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ code, name }));
+  } catch {}
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+function ensureAudio() {
+  if (audioCtx) {
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  audioCtx = new Ctx();
+  return audioCtx;
+}
+
+function playTurnChime() {
+  if (!soundOn) return;
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const start = ctx.currentTime + 0.01;
+  [880, 1174.7].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t0 = start + i * 0.14;
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.32);
+  });
+  if (navigator.vibrate) navigator.vibrate([50, 40, 60]);
+}
+
+const savedSession = readSession();
+if (savedSession) $("code").value = savedSession.code;
+applyZoom();
+applySound();
+["pointerdown", "keydown"].forEach((evt) => {
+  window.addEventListener(evt, () => ensureAudio(), { once: true });
+});
 
 function toast(text) {
   const el = $("toast");
@@ -113,15 +229,27 @@ function groupSelected() {
 
 function renderSeats(room) {
   const match = room.match;
+  const waiting = !match;
   document.querySelectorAll(".seat").forEach((node) => {
     const view = Number(node.dataset.view);
     const seat = you < 0 ? view : (you + view) % 4;
+    node.dataset.seat = String(seat);
     const person = room.seats[seat];
     const count = match?.handsCount?.[seat] ?? 0;
-    const bits = [person?.bot ? "\u673a\u5668\u4eba" : "", remainLabel(count)].filter(Boolean);
+    const mine = seat === you;
+    const pickable = waiting && !mine && (!person || person.bot);
+    const bits = [];
+    if (person?.hosted) bits.push("\u6258\u7ba1\u4e2d");
+    else if (person?.bot) bits.push("\u673a\u5668\u4eba");
+    else if (person && !person.connected) bits.push("\u79bb\u7ebf");
+    if (waiting && mine) bits.push("\u6211\u7684\u5ea7\u4f4d");
+    if (pickable) bits.push("\u70b9\u51fb\u5165\u5ea7");
+    const remain = remainLabel(count);
+    if (remain) bits.push(remain);
     node.classList.toggle("turn", Boolean(match && match.turn === seat && (match.phase === "play" || match.phase === "returnTribute")));
+    node.classList.toggle("me", mine);
+    node.classList.toggle("pick", pickable);
     node.innerHTML = "<b>" + (person?.name ?? "\u7a7a\u4f4d") + "</b><span>" + (bits.join(" \u00b7 ") || " ") + "</span>";
-
   });
 }
 
@@ -256,12 +384,13 @@ function bindHandDrag() {
     }
   });
 
-  const finish = (event) => {
+  const finish = (event, cancelled) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const current = drag;
     drag = null;
     current.node.classList.remove("dragging");
     clearDropTargets();
+    if (cancelled) return;
     if (current.moved) {
       applyDrop(current.id, locateDrop(event.clientX, event.clientY, current.id));
       if (state) renderHand(state.match);
@@ -270,8 +399,8 @@ function bindHandDrag() {
     }
   };
 
-  hand.addEventListener("pointerup", finish);
-  hand.addEventListener("pointercancel", finish);
+  hand.addEventListener("pointerup", (event) => finish(event, false));
+  hand.addEventListener("pointercancel", (event) => finish(event, true));
 }
 
 const FX_INFO = {
@@ -391,7 +520,14 @@ function stateKey(room) {
   ].join("|");
 }
 
+function announceTurn(room) {
+  const mine = isMyTurn(room);
+  if (mine && !myTurnSeen) playTurnChime();
+  myTurnSeen = mine;
+}
+
 function enqueueState(room) {
+  announceTurn(room);
   const tail = stateQueue.at(-1) || displayed;
   if (tail && stateKey(tail) === stateKey(room)) {
     if (stateQueue.length) stateQueue[stateQueue.length - 1] = room;
@@ -412,7 +548,12 @@ function pumpStates() {
   let wait = 0;
   if (prev && !isMyTurn(prev)) wait = Math.max(0, REVEAL_MS - (Date.now() - lastRevealAt));
   pumping = true;
+  const epoch = renderEpoch;
   const go = () => {
+    if (epoch !== renderEpoch) {
+      pumping = false;
+      return;
+    }
     stateQueue.shift();
     displayed = next;
     lastRevealAt = Date.now();
@@ -427,6 +568,8 @@ function pumpStates() {
 function render(room) {
   state = room;
   you = room.you;
+  pendingReconnect = false;
+  if (room.you >= 0) saveSession(room.code, room.seats[room.you]?.name ?? "");
   $("lobby").classList.add("hidden");
   $("table").classList.remove("hidden");
   $("roomCode").textContent = room.code;
@@ -481,7 +624,7 @@ function renderNotice(match) {
 
 function bannerText(room) {
   const match = room.match;
-  if (!match) return "\u6ee14\u4eba\u540e\u5f00\u5c40\uff0c\u7a7a\u4f4d\u53ef\u8865\u673a\u5668\u4eba";
+  if (!match) return "\u70b9\u7a7a\u4f4d\u53ef\u6362\u5ea7 \u00b7 \u6ee14\u4eba\u540e\u5f00\u5c40";
   if (match.phase === "matchOver") {
     if (you < 0) return (match.winnerTeam === 0 ? "\u7ea2\u961f" : "\u84dd\u961f") + " \u8fc7A\u80dc\u51fa";
     return match.winnerTeam === you % 2 ? "\u6211\u65b9\u8fc7A\u80dc\u51fa" : "\u5bf9\u5bb6\u8fc7A\u80dc\u51fa";
@@ -494,20 +637,67 @@ function bannerText(room) {
   return match.names[match.turn] + " \u51fa\u724c";
 }
 
+function resetToLobby(message) {
+  renderEpoch += 1;
+  stateQueue = [];
+  pumping = false;
+  displayed = null;
+  state = null;
+  you = -1;
+  myTurnSeen = false;
+  selected.clear();
+  handPiles = [];
+  trickKey = "";
+  const trick = $("trick");
+  trick.className = "trick";
+  trick.innerHTML = "";
+  $("hand").innerHTML = "";
+  $("fx").innerHTML = "";
+  $("clock").classList.add("hidden");
+  $("notice").classList.add("hidden");
+  $("table").classList.add("hidden");
+  $("lobby").classList.remove("hidden");
+  $("lobbyError").textContent = message || "";
+}
+
 bindHandDrag();
 clockTimer = setInterval(() => {
   if (state) renderClock(state);
 }, 250);
 
-$("createBtn").addEventListener("click", () => {
+function currentName() {
   const name = $("name").value.trim() || "\u73a9\u5bb6";
   localStorage.setItem("guandan-name", name);
-  socket.emit("create", { name });
+  return name;
+}
+
+$("createBtn").addEventListener("click", () => {
+  clearSession();
+  socket.emit("create", { name: currentName(), token: deviceToken() });
 });
 $("joinBtn").addEventListener("click", () => {
-  const name = $("name").value.trim() || "\u73a9\u5bb6";
-  localStorage.setItem("guandan-name", name);
-  socket.emit("join", { name, code: $("code").value });
+  pendingReconnect = false;
+  socket.emit("join", { name: currentName(), code: $("code").value, token: deviceToken() });
+});
+$("leaveBtn").addEventListener("click", () => {
+  socket.emit("leave");
+  clearSession();
+  pendingReconnect = false;
+  resetToLobby();
+  toast("\u5df2\u9000\u51fa\u724c\u684c");
+});
+$("zoomInBtn").addEventListener("click", () => setZoom(zoom + ZOOM_STEP));
+$("zoomOutBtn").addEventListener("click", () => setZoom(zoom - ZOOM_STEP));
+$("soundBtn").addEventListener("click", () => {
+  soundOn = !soundOn;
+  localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off");
+  applySound();
+  if (soundOn) playTurnChime();
+});
+document.querySelector(".board").addEventListener("click", (event) => {
+  const node = event.target.closest(".seat.pick");
+  if (!node || state?.match) return;
+  socket.emit("sit", { seat: Number(node.dataset.seat) });
 });
 $("botBtn").addEventListener("click", () => socket.emit("fillBots"));
 $("startBtn").addEventListener("click", () => socket.emit("start"));
@@ -521,8 +711,25 @@ $("passBtn").addEventListener("click", () => socket.emit("pass"));
 $("groupBtn").addEventListener("click", groupSelected);
 $("hintBtn").addEventListener("click", () => socket.emit("hint"));
 
+function rejoinSavedRoom() {
+  const session = readSession();
+  if (!session) return;
+  pendingReconnect = true;
+  socket.emit("join", { name: session.name || currentName(), code: session.code, token: deviceToken() });
+}
+
+socket.on("connect", rejoinSavedRoom);
+if (socket.connected) rejoinSavedRoom();
 socket.on("state", enqueueState);
 socket.on("errorMessage", (text) => {
+  if (pendingReconnect) {
+    pendingReconnect = false;
+    clearSession();
+    resetToLobby(text);
+    $("code").value = "";
+    toast(text === "\u623f\u95f4\u4e0d\u5b58\u5728" ? "\u539f\u724c\u684c\u5df2\u6563\u573a" : text);
+    return;
+  }
   $("lobbyError").textContent = text;
   toast(text);
 });

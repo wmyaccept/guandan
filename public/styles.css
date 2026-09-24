@@ -7,6 +7,11 @@
   --gold: #e3c36f;
   --line: rgba(243, 238, 227, 0.18);
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  --zoom: 1;
+  --card-base-w: 70px;
+  --card-base-h: 150px;
+  --trick-w: 54px;
+  --trick-h: 108px;
 }
 
 * { box-sizing: border-box; }
@@ -275,10 +280,10 @@ input {
 
 .trick {
   display: flex;
-  gap: 10px;
+  gap: calc(10px * var(--zoom));
   flex-wrap: wrap;
   justify-content: center;
-  min-height: 110px;
+  min-height: calc(var(--trick-h) * var(--zoom) + 6px);
   max-width: 100%;
 }
 .banner { margin: 0; font-size: 20px; text-shadow: 0 2px 12px #000; }
@@ -330,9 +335,9 @@ input {
 .self-status.turn b { color: var(--gold); }
 .self-status span { color: rgba(243, 238, 227, 0.82); font-size: 13px; }
 .hand {
-  --card-w: 70px;
-  --card-h: 150px;
-  --stack: 78px;
+  --card-w: calc(var(--card-base-w) * var(--zoom));
+  --card-h: calc(var(--card-base-h) * var(--zoom));
+  --stack: calc(var(--card-w) + 8px * var(--zoom));
   display: flex;
   flex-wrap: nowrap;
   justify-content: center;
@@ -376,8 +381,9 @@ input {
 }
 
 .card {
-  width: 70px;
-  height: 150px;
+  width: calc(var(--card-base-w) * var(--zoom));
+  height: calc(var(--card-base-h) * var(--zoom));
+  font-size: calc(var(--card-base-w) * var(--zoom) * 0.32);
   border: 1px solid #2a2318;
   background: linear-gradient(#fffaf1, #efe6d4);
   color: #1a1510;
@@ -396,22 +402,21 @@ input {
 .card .wild-mark {
   position: absolute;
   left: 50%;
-  bottom: 10px;
+  bottom: 0.42em;
   transform: translateX(-50%);
-  min-width: 28px;
-  padding: 2px 6px;
+  min-width: 1.3em;
+  padding: 0.08em 0.26em;
   background: #146b3a;
   color: #f4ffe8;
-  font-size: 14px;
+  font-size: 0.62em;
   font-weight: 700;
   line-height: 1.2;
   pointer-events: none;
 }
-.trick .card .wild-mark { font-size: 12px; bottom: 6px; padding: 1px 5px; }
 .card .corner {
   position: absolute;
-  top: 5px;
-  left: 6px;
+  top: 0.2em;
+  left: 0.24em;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -419,11 +424,11 @@ input {
   z-index: 1;
 }
 .card .corner strong {
-  font-size: 22px;
+  font-size: 1em;
   font-weight: 700;
 }
 .card .corner small {
-  font-size: 16px;
+  font-size: 0.72em;
   font-style: normal;
 }
 .card.back {
@@ -435,7 +440,7 @@ input {
   cursor: grab;
 }
 .hand .card.up {
-  transform: translateY(-18px);
+  transform: translateY(calc(var(--card-h) * -0.13));
   outline: 3px solid #f3d27a;
   box-shadow: 0 0 0 2px #7a1d16, 0 14px 22px rgba(0, 0, 0, 0.35);
   z-index: 4;
@@ -449,11 +454,11 @@ input {
   pointer-events: none;
 }
 .trick .card {
-  width: 54px;
-  height: 108px;
-  flex-basis: 54px;
+  width: calc(var(--trick-w) * var(--zoom));
+  height: calc(var(--trick-h) * var(--zoom));
+  flex-basis: calc(var(--trick-w) * var(--zoom));
+  font-size: calc(var(--trick-w) * var(--zoom) * 0.32);
 }
-.trick .card .corner strong { font-size: 16px; }
 
 .log { display: none; }
 .toast {
@@ -481,11 +486,7 @@ input {
   .center { inset: 88px 10px 12px; }
   .dock { grid-template-columns: 1fr; }
   .play-actions { justify-content: center; padding-bottom: 0; }
-  .hand { --card-w: 62px; --card-h: 132px; --stack: 70px; }
-  .pile { width: 62px; min-width: 62px; }
-  .card, .hand .card, .pile .card { width: 62px; height: 132px; }
-  .pile .card { flex-basis: 132px; }
-  .card .corner strong { font-size: 18px; }
+  :root { --card-base-w: 58px; --card-base-h: 124px; --trick-w: 46px; --trick-h: 96px; }
 }
 /* ---------------- 出牌特效 ---------------- */
 .fx {
@@ -689,4 +690,170 @@ input {
   .fx-shout-bomb,
   .fx-shout-flushstraight,
   .fx-shout-jokerbomb { font-size: 42px; }
+}
+
+/* ---------------- 顶栏工具与座位选择 ---------------- */
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  background: rgba(10, 14, 11, 0.35);
+}
+button.icon {
+  width: 38px;
+  min-width: 38px;
+  min-height: 34px;
+  padding: 0;
+  background: transparent;
+  color: var(--ivory);
+}
+button.icon:hover:not(:disabled) {
+  background: rgba(227, 195, 111, 0.18);
+  color: var(--gold);
+}
+button.icon:disabled { opacity: 0.3; cursor: default; }
+button.icon svg,
+button.quit svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+button.icon svg polygon { fill: currentColor; stroke: none; }
+button.quit svg { width: 16px; height: 16px; }
+#soundBtn .ic-off { display: none; }
+#soundBtn.muted { color: rgba(243, 238, 227, 0.45); }
+#soundBtn.muted .ic-on { display: none; }
+#soundBtn.muted .ic-off { display: block; }
+
+.seat { transition: background 0.15s ease, outline-color 0.15s ease; }
+.seat.pick {
+  cursor: pointer;
+  outline: 1px dashed rgba(227, 195, 111, 0.6);
+}
+.seat.pick:hover {
+  background: rgba(227, 195, 111, 0.22);
+  outline-color: var(--gold);
+}
+.seat.me b { color: var(--gold); }
+
+/* ---------------- 手机与窄屏适配 ---------------- */
+body { overscroll-behavior-y: none; }
+.topbar,
+.felt,
+.dock {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hand-wrap { overscroll-behavior-x: contain; }
+
+@media (max-width: 900px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    padding: 6px 10px;
+    padding-top: calc(6px + env(safe-area-inset-top));
+  }
+  .top-info { width: 100%; gap: 8px; font-size: 13px; }
+  .room { font-size: 16px; }
+  .clock { min-width: 44px; padding: 2px 8px; font-size: 13px; }
+  .top-actions { width: 100%; gap: 6px; }
+  .top-actions button { min-height: 36px; padding: 6px 10px; font-size: 13px; }
+  button.icon { width: 34px; min-width: 34px; min-height: 32px; padding: 0; }
+  button.icon svg { width: 16px; height: 16px; }
+  .felt { margin: 6px 8px 8px; }
+  .seat { min-width: 104px; padding: 6px 8px; }
+  .seat b { font-size: 15px; }
+  .seat span { font-size: 12px; }
+  .banner { font-size: 16px; }
+  .dock { padding: 6px 8px 10px; }
+}
+
+@media (max-width: 560px) {
+  :root {
+    --card-base-w: 46px;
+    --card-base-h: 100px;
+    --trick-w: 40px;
+    --trick-h: 86px;
+  }
+  .lobby { grid-template-rows: minmax(44dvh, 1fr) auto; }
+  .lobby-scene,
+  .lobby-copy { min-height: 44dvh; }
+  .lobby-copy { padding: 20px 14px 14px; }
+  .lobby h1 { font-size: 44px; }
+  .lobby h1::after { width: 52px; margin-top: 10px; }
+  .kicker { font-size: 12px; gap: 8px; }
+  .kicker::before,
+  .kicker::after { width: 22px; }
+  .sub { font-size: 15px; margin-top: 8px; }
+  .entry { padding: 12px 12px 14px; gap: 10px; }
+  .entry-actions { flex-direction: column; gap: 8px; }
+  .entry button { width: 100%; min-height: 46px; }
+  .seat { min-width: 86px; max-width: 45%; padding: 5px 7px; }
+  .seat b { font-size: 13px; }
+  .seat span { font-size: 11px; line-height: 1.3; }
+  .seat-left,
+  .seat-right { top: 60px; }
+  .center { inset: 92px 6px 8px; gap: 8px; }
+  .trick { gap: 5px; }
+  .banner { font-size: 14px; text-align: center; }
+  .notice { font-size: 12px; padding: 5px 10px; max-width: 94vw; }
+  .hand { gap: 8px; padding: 6px 2px 2px; }
+  .play-actions { gap: 6px; }
+  .play-actions button {
+    flex: 1 1 0;
+    min-height: 46px;
+    padding: 8px 4px;
+    font-size: 14px;
+  }
+  .dock { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    transform: none;
+    text-align: center;
+  }
+}
+
+@media (max-width: 380px) {
+  :root {
+    --card-base-w: 40px;
+    --card-base-h: 88px;
+    --trick-w: 36px;
+    --trick-h: 78px;
+  }
+  .top-actions button { font-size: 12px; padding: 5px 8px; }
+  .seat { min-width: 76px; }
+}
+
+@media (max-height: 560px) {
+  :root {
+    --card-base-w: 44px;
+    --card-base-h: 96px;
+    --trick-w: 38px;
+    --trick-h: 82px;
+  }
+  .lobby { grid-template-rows: minmax(38dvh, 1fr) auto; }
+  .lobby-scene,
+  .lobby-copy { min-height: 38dvh; }
+  .lobby h1 { font-size: 40px; }
+  .board { min-height: 128px; }
+  .seat-left,
+  .seat-right { top: 54px; }
+  .center { inset: 76px 6px 6px; }
+  .dock { padding-top: 4px; padding-bottom: 6px; }
+  .play-actions { padding-bottom: 0; }
+}
+
+/* 触屏：允许左右滑动手牌区，纵向拖动仍然用于组牌 */
+@media (hover: none) and (pointer: coarse) {
+  .hand .card { touch-action: pan-x; }
+  .hand .card.up { transform: translateY(calc(var(--card-h) * -0.1)) scale(1.02); }
 }
