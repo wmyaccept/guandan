@@ -11,7 +11,7 @@ import {
 } from "./cards.js";
 import { canBeat, comboLabel, parseCombo } from "./combos.js";
 import { generatePlays } from "./moves.js";
-import { chooseAction, chooseReturnCard } from "./ai.js";
+import { chooseAction, chooseReturnCard, normalizeDifficulty } from "./ai.js";
 
 const TEAM_NAMES = ["红队", "蓝队"];
 
@@ -35,6 +35,7 @@ export function createMatch(names, options = {}) {
   return {
     names: names.slice(0, 4),
     bots: options.bots ?? [false, false, false, false],
+    difficulty: normalizeDifficulty(options.difficulty),
     teamLevel: [15, 15],
     bankerTeam: 0,
     round: 0,
@@ -389,6 +390,7 @@ export function publicState(match, viewerSeat = null) {
   return {
     names: match.names,
     bots: match.bots,
+    difficulty: normalizeDifficulty(match.difficulty),
     phase: match.phase,
     round: match.round,
     levelRank,
@@ -414,19 +416,19 @@ export function publicState(match, viewerSeat = null) {
   };
 }
 
-export function autoAct(match, seat) {
+export function autoAct(match, seat, rng = Math.random) {
   if (seat == null || !match.hands[seat]) return { ok: false, error: "座位无效" };
   const levelRank = levelRankOf(match);
   if (match.phase === "returnTribute") {
     const allowed = returnableCards(match.hands[seat], levelRank);
-    const pick = chooseReturnCard(match.hands[seat], allowed, levelRank);
+    const pick = chooseReturnCard(match.hands[seat], allowed, levelRank, match.difficulty, rng);
     return returnTribute(match, seat, (pick ?? allowed[0])?.id);
   }
   if (match.phase !== "play" || match.turn !== seat) return { ok: false };
   const hand = match.hands[seat];
   let decision = null;
   try {
-    decision = chooseAction(match, seat, levelRank);
+    decision = chooseAction(match, seat, levelRank, match.difficulty, rng);
   } catch {
     decision = null;
   }

@@ -212,3 +212,102 @@ test("四个机器人能完整打完一局不卡死", () => {
   assert.equal(match.phase, "roundOver");
   assert.ok(steps > 10);
 });
+
+test("简单档不看队友，照压不误", () => {
+  const current = parseCombo(makeHand("S9"), 15);
+  const build = () =>
+    table({
+      hands: [makeHand("SA", "S3", "D4", "C5", "S6", "H7"), filler(12, 4), filler(12, 20), filler(12, 32)],
+      current,
+      turn: 0,
+      winner: 2
+    });
+  assert.equal(chooseAction(build(), 0, 15, "hard").action, "pass");
+  assert.equal(chooseAction(build(), 0, 15, "medium", rng(5)).action, "play");
+  let plays = 0;
+  for (let seed = 1; seed <= 24; seed += 1) {
+    if (chooseAction(build(), 0, 15, "easy", rng(seed)).action === "play") plays += 1;
+  }
+  assert.ok(plays >= 15, "简单档应该经常压队友的牌，实际 " + plays + "/24");
+});
+
+test("简单档会浪费炸弹，中等和强力留着", () => {
+  const current = parseCombo(makeHand("SA", "HA"), 15);
+  const hand = makeHand("S9", "H9", "D9", "C9", "S3", "D4", "C5", "S6", "H7", "D8", "C10", "SJ");
+  const build = () =>
+    table({ hands: [hand, filler(20, 4), filler(20, 26), filler(12, 32)], current, turn: 0, winner: 1 });
+  assert.equal(chooseAction(build(), 0, 15, "hard").action, "pass");
+  assert.equal(chooseAction(build(), 0, 15, "medium", rng(4)).action, "pass");
+  let bombs = 0;
+  for (let seed = 1; seed <= 20; seed += 1) {
+    if (chooseAction(build(), 0, 15, "easy", rng(seed)).action === "play") bombs += 1;
+  }
+  assert.ok(bombs >= 5, "简单档应该经常乱炸，实际 " + bombs + "/20");
+});
+
+test("简单档领出只会挑最小的单张或对子", () => {
+  const hand = makeHand("S3", "S6", "SA", "H9", "D12", "C13");
+  const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)], turn: 0 });
+  for (let seed = 1; seed <= 12; seed += 1) {
+    const decision = chooseAction(match, 0, 15, "easy", rng(seed));
+    assert.equal(decision.action, "play");
+    assert.equal(decision.cardIds.length, 1);
+    assert.ok(
+      ["0-S-3", "0-S-6", "0-H-9"].includes(decision.cardIds[0]),
+      "简单档应该出最小的几张，实际 " + decision.cardIds[0]
+    );
+  }
+});
+
+test("非法难度按强力处理", () => {
+  const current = parseCombo(makeHand("S9"), 15);
+  const build = () =>
+    table({
+      hands: [makeHand("SA", "S3", "D4", "C5", "S6", "H7"), filler(12, 4), filler(12, 20), filler(12, 32)],
+      current,
+      turn: 0,
+      winner: 2
+    });
+  assert.equal(chooseAction(build(), 0, 15).action, "pass");
+  assert.equal(chooseAction(build(), 0, 15, "nonsense").action, "pass");
+  assert.equal(chooseAction(build(), 0, 15, undefined).action, "pass");
+});
+
+test("三档机器人都能各自打完整局不卡死", () => {
+  for (const level of ["easy", "medium", "hard"]) {
+    const match = createMatch(["甲", "乙", "丙", "丁"], { bots: [true, true, true, true], difficulty: level });
+    assert.equal(match.difficulty, level);
+    startRound(match, rng(7));
+    let steps = 0;
+    while (match.phase === "play" && steps < 4000) {
+      const result = autoAct(match, match.turn, rng(steps + 11));
+      assert.equal(result.ok, true, level + " 卡住了: " + (result.error ?? ""));
+      steps += 1;
+    }
+    assert.equal(match.phase, "roundOver", level + " 没能打完一局");
+  }
+});
+
+test("同一桌混着打，强力队拿头游的次数多于简单队", () => {
+  const levels = ["hard", "easy", "hard", "easy"];
+  let hardHead = 0;
+  let easyHead = 0;
+  for (let i = 0; i < 20; i += 1) {
+    const match = createMatch(["强甲", "简乙", "强丙", "简丁"], {
+      bots: [true, true, true, true],
+      difficulty: "hard"
+    });
+    startRound(match, rng(1000 + i));
+    let steps = 0;
+    while (match.phase === "play" && steps < 4000) {
+      match.difficulty = levels[match.turn];
+      const result = autoAct(match, match.turn, rng(steps * 31 + i * 7 + 5));
+      assert.equal(result.ok, true, "混档对局卡住了: " + (result.error ?? ""));
+      steps += 1;
+    }
+    assert.equal(match.phase, "roundOver");
+    if (match.finishOrder[0] % 2 === 0) hardHead += 1;
+    else easyHead += 1;
+  }
+  assert.ok(hardHead > easyHead, "强力队头游 " + hardHead + " 次，简单队 " + easyHead + " 次");
+});

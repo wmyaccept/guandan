@@ -244,3 +244,44 @@ test("旧连接仍被判为在线时，凭令牌也能收回原座位", (t) => {
   assert.equal(back.match.hand.map((card) => card.id).join(","), handBefore, "手牌应该原样保留");
   assert.equal(back.seats.filter((seat) => seat && seat.connected).length, 4, "不应该多占座位");
 });
+
+test("点击头像可以砸蛋送花，非法目标和连点会被忽略", (t) => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1700000000000 });
+  t.after(() => mock.timers.reset());
+
+  const io = makeIo();
+  attachSockets(io);
+  const host = makeSocket(io, "host");
+  io.connect(host);
+  host.fire("create", { name: "小明" });
+  const code = host.last("state").code;
+
+  const guest = makeSocket(io, "guest");
+  io.connect(guest);
+  guest.fire("join", { name: "小红", code });
+
+  const thrown = (socket) => socket.events.filter((item) => item.event === "gesture");
+
+  host.fire("gesture", { seat: 2, kind: "egg" });
+  host.fire("gesture", { seat: 1, kind: "bomb" });
+  host.fire("gesture", { seat: 0, kind: "egg" });
+  host.fire("gesture", { seat: 9, kind: "egg" });
+  host.fire("gesture", {});
+  assert.equal(thrown(guest).length, 0, "空位、非法牌型、自己和越界目标都不应该广播");
+
+  host.fire("fillBots");
+  host.fire("start");
+  host.fire("gesture", { seat: 1, kind: "egg" });
+  assert.deepEqual(thrown(guest).map((item) => item.payload), [
+    { from: 0, to: 1, kind: "egg", by: "小明" }
+  ]);
+  assert.equal(thrown(host).length, 1, "发起者自己也要看到动画");
+
+  host.fire("gesture", { seat: 1, kind: "flower" });
+  assert.equal(thrown(guest).length, 1, "冷却时间内的连点应该被忽略");
+
+  mock.timers.tick(1300);
+  host.fire("gesture", { seat: 1, kind: "flower" });
+  assert.equal(thrown(guest).length, 2, "冷却结束后可以再次互动");
+  assert.equal(thrown(guest)[1].payload.kind, "flower");
+});

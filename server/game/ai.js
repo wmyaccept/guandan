@@ -2,6 +2,8 @@ import { isHeartLevel, pointValue, rankValue } from "./cards.js";
 import { TYPES, bombPower, comboLabel } from "./combos.js";
 import { generatePlays } from "./moves.js";
 
+export const DIFFICULTIES = ["easy", "medium", "hard"];
+
 const RANKS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 const BOMB_RANKS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const SEQ_MAX = 14;
@@ -30,6 +32,46 @@ const W = {
   dumpEarly: 1.2,
   finishBias: 3
 };
+
+// Three genuinely different decision styles rather than one difficulty knob:
+//   easy   - naive; no hand planning, beats its own partner, wastes bombs
+//   medium - plans structure and keeps bombs, but plays selfishly and noisily
+//   hard   - full logic: partner care, stop plays, endgame feeding
+const PROFILE = {
+  easy: {
+    planner: "naive",
+    noise: 0
+  },
+  medium: {
+    planner: "structure",
+    noise: 3.4,
+    partnerAware: false,
+    stopAware: false,
+    feedPartner: false,
+    topKind: false,
+    bombLead: 34
+  },
+  hard: {
+    planner: "structure",
+    noise: 0,
+    partnerAware: true,
+    stopAware: true,
+    feedPartner: true,
+    topKind: true,
+    bombLead: W.bombLead
+  }
+};
+
+const NAIVE_BASE = { groups: [], tricks: 0, powerTotal: 0, bombWeight: 0, score: 0 };
+const NO_STRUCT = { tricks: 0, bombLoss: 0 };
+
+export function normalizeDifficulty(value) {
+  return DIFFICULTIES.includes(value) ? value : "hard";
+}
+
+function profileOf(difficulty) {
+  return PROFILE[normalizeDifficulty(difficulty)];
+}
 
 function emptyPool() {
   const pool = Object.create(null);
@@ -279,27 +321,33 @@ function dedupe(plays, levelRank) {
   return [...best.values()].slice(0, MAX_CANDIDATES);
 }
 
-function buildContext(match, seat, levelRank) {
+function buildContext(match, seat, levelRank, profile) {
   const hand = match.hands[seat];
   const handsCount = match.hands.map((item) => item.length);
   const partner = (seat + 2) % 4;
   const alive = [0, 1, 2, 3].filter((index) => handsCount[index] > 0);
   const current = match.current ?? null;
   const winnerSeat = current ? match.lastPlay?.seat ?? match.leadSeat : null;
-  const base = decompose(hand, levelRank);
+  const naive = profile.planner === "naive";
+  // The naive tier never reads hand structure, so skip the costly decomposition.
+  const base = naive ? NAIVE_BASE : decompose(hand, levelRank);
   const candidates = dedupe(generatePlays(hand, levelRank, current), levelRank).map((combo) => ({
     c: combo,
-    st: structureOfCards(hand, combo.cards, base, levelRank)
+    st: naive ? NO_STRUCT : structureOfCards(hand, combo.cards, base, levelRank)
   }));
   const winnerCount = winnerSeat == null ? 0 : handsCount[winnerSeat];
   const partnerIsHead = match.finishOrder[0] === partner;
   const lastToAct = Boolean(current) && match.passes + 1 >= alive.length - 1;
-  const stopNeeded = Boolean(current) && (winnerCount <= 6 || partnerIsHead || (lastToAct && winnerCount <= 10));
+  const stopNeeded =
+    Boolean(current) &&
+    profile.stopAware &&
+    (winnerCount <= 6 || partnerIsHead || (lastToAct && winnerCount <= 10));
   return {
     match,
     seat,
     hand,
     levelRank,
+    profile,
     handsCount,
     partner,
     alive,
@@ -318,17 +366,17 @@ function buildContext(match, seat, levelRank) {
 }
 
 function leadScore({ c, st }, ctx) {
-  const { levelRank, base, myCount, unseen } = ctx;
+  const { levelRank, base, myCount, unseen, profile } = ctx;
   const power = bombPower(c);
   let score = 0;
   score -= W.structTrick * st.tricks;
   score -= W.structBomb * st.bombLoss;
-  if (power) score -= base.tricks <= 2 || myCount <= 8 ? W.bombLeadEndgame : W.bombLead;
+  if (power) score -= base.tricks <= 2 || myCount <= 8 ? W.bombLeadEndgame : profile.bombLead;
   score += W.dump * c.length;
   score -= W.rankLead * rankValue(c.rank, levelRank);
   score -= W.wild * wildsUsed(c.cards, levelRank);
   score -= W.control * controlCost(c.cards, levelRank);
-  if (isTopOfKind(c, unseen, levelRank)) score += W.topKind;
+  if (profile.topKind && isTopOfKind(c, unseen, levelRank)) score += W.topKind;
   if (base.tricks <= 2 && !power) score += W.finishBias * rankValue(c.rank, levelRank);
   if (myCount >= 15) score += W.dumpEarly * c.length;
   return score;
@@ -347,10 +395,11 @@ function followScore({ c, st }, ctx) {
   return score;
 }
 
-function rankOrder(ctx) {
+function rankOrder(ctx, rng = Math.random) {
   const score = ctx.current ? followScore : leadScore;
+  const noise = ctx.profile.noise || 0;
   return ctx.candidates
-    .map((item) => ({ item, score: score(item, ctx) }))
+    .map((item) => ({ item, score: score(item, ctx) + (noise ? (rng() * 2 - 1) * noise : 0) }))
     .sort(
       (a, b) =>
         b.score - a.score ||
@@ -365,9 +414,9 @@ function cardIds(combo) {
 
 function lead(ctx, order) {
   if (!order.length) return { action: "play", cardIds: [ctx.hand[0].id], reason: "无牌可组", order };
-  const { partnerCount, levelRank } = ctx;
+  const { partnerCount, levelRank, profile } = ctx;
   // Partner is about to go out: feed them exactly what they can play.
-  if (partnerCount > 0 && partnerCount <= 2) {
+  if (profile.feedPartner && partnerCount > 0 && partnerCount <= 2) {
     const fit = order
       .filter(({ item }) => !bombPower(item.c) && item.c.length === partnerCount)
       .sort((a, b) => rankValue(a.item.c.rank, levelRank) - rankValue(b.item.c.rank, levelRank));
@@ -378,8 +427,8 @@ function lead(ctx, order) {
 }
 
 function follow(ctx, order) {
-  const { current, winnerSeat, partner, levelRank, lastToAct, stopNeeded, myCount } = ctx;
-  if (winnerSeat === partner) return { action: "pass", reason: "队友的牌", order };
+  const { current, winnerSeat, partner, levelRank, lastToAct, stopNeeded, myCount, profile } = ctx;
+  if (profile.partnerAware && winnerSeat === partner) return { action: "pass", reason: "队友的牌", order };
 
   const plain = order.filter(({ item }) => !bombPower(item.c));
   const bombs = order
@@ -416,19 +465,58 @@ function follow(ctx, order) {
   return { action: "pass", reason: "压不住", order };
 }
 
-function decide(ctx) {
+// Casual-player logic for the easy tier: no decomposition and no partner care.
+// It plays the cheapest legal thing, overbeats its own partner, burns bombs on
+// tricks that are not worth it, and sometimes simply cannot be bothered to win.
+function easyDecide(ctx, rng) {
+  const { levelRank, current, myCount } = ctx;
+  const options = ctx.candidates.map((entry) => entry.c);
+  if (!options.length) return { action: "pass", reason: "压不住", order: [] };
+
+  const cheap = options
+    .slice()
+    .sort(
+      (a, b) =>
+        rankValue(a.rank, levelRank) - rankValue(b.rank, levelRank) ||
+        a.length - b.length ||
+        bombPower(a) - bombPower(b)
+    );
+
+  const goingOut = cheap.find((combo) => combo.length === myCount);
+  if (goingOut) return { action: "play", cardIds: cardIds(goingOut), reason: "一把走完", order: [] };
+
+  if (!current) {
+    // Jitter among the three cheapest plain cards so it is not a fixed script.
+    const plain = cheap.filter((combo) => !bombPower(combo) && combo.length <= 2);
+    const pool = (plain.length ? plain : cheap).slice(0, 3);
+    const pick = pool[Math.floor(rng() * pool.length) % pool.length];
+    return { action: "play", cardIds: cardIds(pick), reason: "领出" + comboLabel(pick), order: [] };
+  }
+
+  const winners = cheap.filter((combo) => !bombPower(combo));
+  const bombs = cheap.filter((combo) => bombPower(combo));
+  if (winners.length) {
+    if (rng() < 0.18) return { action: "pass", reason: "先不要", order: [] };
+    return { action: "play", cardIds: cardIds(winners[0]), reason: "压上家", order: [] };
+  }
+  if (bombs.length && rng() < 0.5) return { action: "play", cardIds: cardIds(bombs[0]), reason: "炸弹拦下", order: [] };
+  return { action: "pass", reason: "压不住", order: [] };
+}
+
+function decide(ctx, rng = Math.random) {
   if (!ctx.hand.length) return { action: "pass", reason: "没有牌", order: [] };
-  const order = rankOrder(ctx);
+  if (ctx.profile.planner === "naive") return easyDecide(ctx, rng);
+  const order = rankOrder(ctx, rng);
   const goingOut = order.find(({ item }) => item.c.length === ctx.myCount);
   if (goingOut) return { action: "play", cardIds: cardIds(goingOut.item.c), reason: "一把走完", order };
   return ctx.current ? follow(ctx, order) : lead(ctx, order);
 }
 
-export function chooseAction(match, seat, levelRank) {
-  const ctx = buildContext(match, seat, levelRank);
-  const decision = decide(ctx);
+export function chooseAction(match, seat, levelRank, difficulty = "hard", rng = Math.random) {
+  const ctx = buildContext(match, seat, levelRank, profileOf(difficulty));
+  const decision = decide(ctx, rng);
   if (!ctx.current && decision.action === "pass") {
-    const fallback = rankOrder(ctx)[0] ?? ctx.candidates[0];
+    const fallback = rankOrder(ctx, rng)[0] ?? ctx.candidates[0];
     if (fallback) {
       const combo = fallback.item?.c ?? fallback.c;
       return { action: "play", cardIds: cardIds(combo), reason: "必须出牌", order: decision.order };
@@ -438,8 +526,9 @@ export function chooseAction(match, seat, levelRank) {
 }
 
 export function suggestPlays(match, seat, levelRank) {
-  const ctx = buildContext(match, seat, levelRank);
-  const decision = decide(ctx);
+  // Hints always use the strongest read, whatever level the table's bots are.
+  const ctx = buildContext(match, seat, levelRank, PROFILE.hard);
+  const decision = decide(ctx, () => 0.5);
   const list = [];
   const push = (action, ids, reason) => {
     if (!ids.length) return;
@@ -452,8 +541,10 @@ export function suggestPlays(match, seat, levelRank) {
   return list.map(({ action, cardIds: ids, reason }) => ({ action, cardIds: ids, reason }));
 }
 
-export function chooseReturnCard(hand, allowed, levelRank) {
+export function chooseReturnCard(hand, allowed, levelRank, difficulty = "hard", rng = Math.random) {
   if (!allowed.length) return null;
+  // The easy tier hands back whatever is nearest instead of its worst card.
+  if (normalizeDifficulty(difficulty) === "easy") return allowed[Math.floor(rng() * allowed.length) % allowed.length];
   const counts = Object.create(null);
   for (const card of hand) counts[card.rank] = (counts[card.rank] ?? 0) + 1;
   return allowed

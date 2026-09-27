@@ -1,4 +1,4 @@
-import { chooseReturnCard, suggestPlays } from "./game/ai.js";
+import { chooseReturnCard, normalizeDifficulty, suggestPlays } from "./game/ai.js";
 import { autoAct, createMatch, levelRankOf, playCards, passTurn, publicState, returnableCards, returnTribute, startRound } from "./game/engine.js";
 
 const rooms = new Map();
@@ -6,6 +6,8 @@ const socketRoom = new Map();
 const BOT_DELAY_MS = 2800;
 const TURN_LIMIT_MS = 30000;
 const ROOM_GRACE_MS = 10 * 60 * 1000;
+const GESTURE_COOLDOWN_MS = 1200;
+const GESTURES = new Set(["egg", "flower"]);
 
 function randomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -58,6 +60,8 @@ function serializeRoom(room, socketId) {
     code: room.code,
     seats: room.seats.map(seatView),
     hostId: room.hostId,
+    youHost: room.hostId === socketId,
+    difficulty: normalizeDifficulty(room.difficulty),
     match: room.match ? publicState(room.match, seat >= 0 ? seat : null) : null,
     you: seat,
     turnEndsAt: room.turnEndsAt ?? null
@@ -68,6 +72,13 @@ function broadcast(io, room) {
   for (const [id, socket] of io.sockets.sockets) {
     if (socketRoom.get(id) !== room.code) continue;
     socket.emit("state", serializeRoom(room, id));
+  }
+}
+
+function toRoom(io, room, event, payload) {
+  for (const [id, socket] of io.sockets.sockets) {
+    if (socketRoom.get(id) !== room.code) continue;
+    socket.emit(event, payload);
   }
 }
 
@@ -155,11 +166,12 @@ function scheduleAfterAction(io, room, delayMs = 0) {
 
 export function attachSockets(io) {
   io.on("connection", (socket) => {
-    socket.on("create", ({ name, token } = {}) => {
+    socket.on("create", ({ name, token, difficulty } = {}) => {
       const code = randomCode();
       const room = {
         code,
         hostId: socket.id,
+        difficulty: normalizeDifficulty(difficulty),
         seats: [null, null, null, null],
         match: null,
         actionToken: 0,
@@ -256,6 +268,17 @@ export function attachSockets(io) {
       }
     });
 
+    // Host only, and only while the table has no live match on it.
+    socket.on("setDifficulty", ({ level } = {}) => {
+      const room = getRoom(socketRoom.get(socket.id));
+      if (!room || room.hostId !== socket.id) return;
+      if (room.match && room.match.phase !== "matchOver") {
+        return socket.emit("errorMessage", "\u5f00\u5c40\u540e\u4e0d\u80fd\u6539\u673a\u5668\u4eba\u5f3a\u5ea6");
+      }
+      room.difficulty = normalizeDifficulty(level);
+      broadcast(io, room);
+    });
+
     socket.on("fillBots", () => {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;
@@ -274,7 +297,7 @@ export function attachSockets(io) {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;
       if (!filled(room)) return socket.emit("errorMessage", "\u6ee14\u4eba\u624d\u80fd\u5f00\u5c40\uff0c\u7a7a\u4f4d\u53ef\u4ee5\u52a0\u673a\u5668\u4eba");
-      room.match = createMatch(namesOf(room), { bots: botsOf(room) });
+      room.match = createMatch(namesOf(room), { bots: botsOf(room), difficulty: room.difficulty });
       startRound(room.match);
       scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
@@ -312,6 +335,26 @@ export function attachSockets(io) {
       if (room.match.phase !== "roundOver") return;
       startRound(room.match);
       scheduleAfterAction(io, room, BOT_DELAY_MS);
+    });
+
+    // Egg / flower thrown at another seat; everyone at the table sees it.
+    socket.on("gesture", ({ seat, kind } = {}) => {
+      const room = getRoom(socketRoom.get(socket.id));
+      if (!room) return;
+      const from = room.seats.findIndex((item) => item?.socketId === socket.id);
+      if (from < 0) return;
+      const to = Number(seat);
+      if (!Number.isInteger(to) || to < 0 || to > 3 || to === from) return;
+      if (!room.seats[to] || !GESTURES.has(kind)) return;
+      const now = Date.now();
+      if (socket.gestureAt && now - socket.gestureAt < GESTURE_COOLDOWN_MS) return;
+      socket.gestureAt = now;
+      toRoom(io, room, "gesture", {
+        from,
+        to,
+        kind,
+        by: room.seats[from].name
+      });
     });
 
     socket.on("hint", () => {

@@ -62,6 +62,71 @@ function applySound() {
   $("soundBtn").setAttribute("aria-pressed", soundOn ? "true" : "false");
 }
 
+/* ---------------- appearance: card skin and table cloth ---------------- */
+const SKIN_KEY = "guandan-card-skin";
+const FELT_KEY = "guandan-felt";
+const CARD_SKINS = [
+  { id: "classic", name: "\u7ecf\u5178" },
+  { id: "pearl", name: "\u6708\u767d" },
+  { id: "kraft", name: "\u725b\u76ae\u7eb8" },
+  { id: "ink", name: "\u58a8\u9ed1" },
+  { id: "jade", name: "\u9752\u7389" }
+];
+const FELTS = [
+  { id: "green", name: "\u7fe1\u7fe0\u7eff" },
+  { id: "blue", name: "\u6df1\u6d77\u84dd" },
+  { id: "wine", name: "\u9152\u7ea2" },
+  { id: "plum", name: "\u7d2b\u6885" },
+  { id: "walnut", name: "\u80e1\u6843\u6728" },
+  { id: "slate", name: "\u77f3\u677f\u7070" }
+];
+const SKIN_IDS = CARD_SKINS.map((skin) => skin.id);
+const FELT_IDS = FELTS.map((felt) => felt.id);
+
+function readChoice(key, ids, fallback) {
+  let value = null;
+  try {
+    value = localStorage.getItem(key);
+  } catch {}
+  return ids.includes(value) ? value : fallback;
+}
+
+let cardSkin = readChoice(SKIN_KEY, SKIN_IDS, "classic");
+let feltColor = readChoice(FELT_KEY, FELT_IDS, "green");
+
+function markChoice(row, attr, value) {
+  for (const node of document.querySelectorAll(row + " .opt")) {
+    const on = node.dataset[attr] === value;
+    node.classList.toggle("on", on);
+    node.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+}
+
+function applyAppearance() {
+  document.documentElement.dataset.cardSkin = cardSkin;
+  document.documentElement.dataset.felt = feltColor;
+  markChoice("#cardSkins", "skin", cardSkin);
+  markChoice("#feltColors", "felt", feltColor);
+}
+
+function setCardSkin(id) {
+  if (!SKIN_IDS.includes(id) || id === cardSkin) return;
+  cardSkin = id;
+  try {
+    localStorage.setItem(SKIN_KEY, id);
+  } catch {}
+  applyAppearance();
+}
+
+function setFelt(id) {
+  if (!FELT_IDS.includes(id) || id === feltColor) return;
+  feltColor = id;
+  try {
+    localStorage.setItem(FELT_KEY, id);
+  } catch {}
+  applyAppearance();
+}
+
 // Stable per browser so a reload can claim the very same seat back,
 // even when the server has not noticed the old connection die yet.
 function deviceToken() {
@@ -136,6 +201,7 @@ const savedSession = readSession();
 if (savedSession) $("code").value = savedSession.code;
 applyZoom();
 applySound();
+applyAppearance();
 ["pointerdown", "keydown"].forEach((evt) => {
   window.addEventListener(evt, () => ensureAudio(), { once: true });
 });
@@ -164,7 +230,9 @@ function renderCard(card, levelRank) {
   const rank = RANK[card.rank];
   const suit = SUIT[card.suit] ?? "";
   const wild = card.suit === "H" && card.rank === levelRank;
-  div.innerHTML = '<span class="corner"><strong>' + rank + '</strong><small>' + suit + '</small></span>' + (wild ? '<span class="wild-mark">配</span>' : '');
+  div.innerHTML = '<span class="pip">' + suit + '</span>' +
+    '<span class="corner"><strong>' + rank + '</strong><small>' + suit + '</small></span>' +
+    (wild ? '<span class="wild-mark">配</span>' : '');
   return div;
 }
 
@@ -227,6 +295,37 @@ function groupSelected() {
   if (state) renderHand(state.match);
 }
 
+const AVATAR_COLORS = ["#c05f45", "#3d7d68", "#4a6fa5", "#a8763c", "#7a5a9c", "#4f8a5b"];
+
+function escapeHtml(text) {
+  return String(text ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[ch]));
+}
+
+function avatarColor(name) {
+  let hash = 0;
+  for (const ch of String(name ?? "")) hash = (hash * 31 + ch.codePointAt(0)) % 9973;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function avatarInitial(name) {
+  const text = String(name ?? "").trim();
+  if (!text) return "?";
+  const first = [...text][0];
+  return /[A-Za-z]/.test(first) ? first.toUpperCase() : first;
+}
+
+function avatarHtml(person, seat) {
+  if (!person) return '<span class="avatar avatar-empty">\u7a7a</span>';
+  return '<button type="button" class="avatar" data-seat="' + seat + '" style="--av:' + avatarColor(person.name) +
+    '" title="\u7838\u86cb / \u9001\u82b1">' + escapeHtml(avatarInitial(person.name)) + "</button>";
+}
+
 function renderSeats(room) {
   const match = room.match;
   const waiting = !match;
@@ -249,7 +348,9 @@ function renderSeats(room) {
     node.classList.toggle("turn", Boolean(match && match.turn === seat && (match.phase === "play" || match.phase === "returnTribute")));
     node.classList.toggle("me", mine);
     node.classList.toggle("pick", pickable);
-    node.innerHTML = "<b>" + (person?.name ?? "\u7a7a\u4f4d") + "</b><span>" + (bits.join(" \u00b7 ") || " ") + "</span>";
+    node.innerHTML = avatarHtml(person, seat) +
+      '<div class="seat-text"><b>' + escapeHtml(person?.name ?? "\u7a7a\u4f4d") + "</b><span>" +
+      (bits.join(" \u00b7 ") || " ") + "</span></div>";
   });
 }
 
@@ -260,7 +361,7 @@ function renderSelf(room) {
   const person = room.seats[seat];
   const match = room.match;
   const remain = remainLabel(match?.handsCount?.[seat] ?? 0);
-  el.innerHTML = "<b>" + (person?.name ?? "") + "</b>" + (remain ? "<span>" + remain + "</span>" : "");
+  el.innerHTML = "<b>" + escapeHtml(person?.name ?? "") + "</b>" + (remain ? "<span>" + remain + "</span>" : "");
   el.classList.toggle("turn", Boolean(match && you === match.turn && (match.phase === "play" || match.phase === "returnTribute")));
 }
 
@@ -401,6 +502,121 @@ function bindHandDrag() {
 
   hand.addEventListener("pointerup", (event) => finish(event, false));
   hand.addEventListener("pointercancel", (event) => finish(event, true));
+}
+
+/* ---------------- avatar gestures: throw an egg, send flowers ---------------- */
+const GESTURE_KINDS = {
+  egg: {
+    label: "\u7838\u86cb",
+    icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="14" rx="7" ry="8.4"/><path d="M8 6.4 9.8 4l2 2.2L14 4l1.8 2.3"/></svg>',
+    fly: '<svg viewBox="0 0 32 40" aria-hidden="true"><ellipse cx="16" cy="23" rx="11.4" ry="14" fill="#fff8ec" stroke="#cdbfa2" stroke-width="1.3"/><ellipse cx="12.4" cy="18" rx="3.2" ry="4.4" fill="#fffdf7"/></svg>'
+  },
+  flower: {
+    label: "\u9001\u82b1",
+    icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.4" r="2.6"/><circle cx="8.2" cy="11.8" r="2.6"/><circle cx="15.8" cy="11.8" r="2.6"/><path d="M12 12.4V21M12 17l3-2M12 19l-3-2"/></svg>',
+    fly: '<svg viewBox="0 0 40 40" aria-hidden="true"><g fill="#f2789f"><circle cx="20" cy="10" r="6"/><circle cx="11" cy="17" r="6"/><circle cx="29" cy="17" r="6"/></g><circle cx="20" cy="16" r="4" fill="#ffd76a"/><path d="M20 21v15" stroke="#4f9a5f" stroke-width="3" fill="none" stroke-linecap="round"/></svg>'
+  }
+};
+let gesturePopSeat = -1;
+
+function seatAnchor(seat) {
+  const node = document.querySelector('.seat[data-seat="' + seat + '"] .avatar');
+  if (node && node.offsetParent) {
+    const box = node.getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  }
+  return { x: window.innerWidth / 2, y: window.innerHeight - 48 };
+}
+
+function burstHtml(kind) {
+  const parts = [];
+  const bits = kind === "flower" ? 10 : 8;
+  const cls = kind === "flower" ? "petal" : "shard";
+  parts.push(kind === "flower" ? '<span class="bloom"></span>' : '<span class="yolk"></span>');
+  for (let i = 0; i < bits; i += 1) {
+    const step = kind === "flower" ? 36 : 45;
+    parts.push('<i class="' + cls + '" style="--ang:' + (i * step - 12) + "deg;--dist:" + (24 + (i % 3) * 16) + 'px"></i>');
+  }
+  return parts.join("");
+}
+
+function playGesture(from, to, kind, by) {
+  const layer = $("gestureLayer");
+  const info = GESTURE_KINDS[kind];
+  if (!layer || !info) return;
+  const start = seatAnchor(from);
+  const end = seatAnchor(to);
+  const fly = document.createElement("div");
+  fly.className = "gesture-fly gesture-fly-" + kind;
+  fly.style.setProperty("--sx", start.x + "px");
+  fly.style.setProperty("--sy", start.y + "px");
+  fly.style.setProperty("--dx", (end.x - start.x) + "px");
+  fly.style.setProperty("--dy", (end.y - start.y) + "px");
+  fly.innerHTML = info.fly;
+  layer.append(fly);
+  setTimeout(() => fly.remove(), 720);
+
+  setTimeout(() => {
+    const burst = document.createElement("div");
+    burst.className = "gesture-burst gesture-burst-" + kind;
+    burst.style.left = end.x + "px";
+    burst.style.top = end.y + "px";
+    burst.innerHTML = burstHtml(kind);
+    const who = [by, state?.seats?.[to]?.name].filter(Boolean).join(" \u2192 ");
+    if (who) {
+      const cap = document.createElement("span");
+      cap.className = "gesture-cap";
+      cap.textContent = who;
+      burst.append(cap);
+    }
+    layer.append(burst);
+    setTimeout(() => burst.remove(), 1500);
+    const seatNode = document.querySelector('.seat[data-seat="' + to + '"]');
+    if (seatNode && seatNode.offsetParent) {
+      seatNode.classList.add("gesture-hit");
+      setTimeout(() => seatNode.classList.remove("gesture-hit"), 950);
+    }
+  }, 620);
+}
+
+function closeGesturePop() {
+  gesturePopSeat = -1;
+  $("gesturePop").classList.add("hidden");
+}
+
+function openGesturePop(seat, anchorEl) {
+  const pop = $("gesturePop");
+  if (!pop || seat < 0 || seat === you) return;
+  if (gesturePopSeat === seat) {
+    closeGesturePop();
+    return;
+  }
+  gesturePopSeat = seat;
+  pop.innerHTML = "";
+  for (const kind of Object.keys(GESTURE_KINDS)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "gesture-btn";
+    btn.innerHTML = GESTURE_KINDS[kind].icon;
+    const label = document.createElement("span");
+    label.textContent = GESTURE_KINDS[kind].label;
+    btn.append(label);
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      socket.emit("gesture", { seat, kind });
+      closeGesturePop();
+    });
+    pop.append(btn);
+  }
+  pop.classList.remove("hidden");
+  const box = anchorEl.getBoundingClientRect();
+  const size = pop.getBoundingClientRect();
+  let left = box.left + box.width / 2 - size.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - size.width - 8));
+  let top = box.bottom + 8;
+  if (top + size.height > window.innerHeight - 8) top = Math.max(8, box.top - size.height - 8);
+  pop.style.left = Math.round(left) + "px";
+  pop.style.top = Math.round(top) + "px";
 }
 
 const FX_INFO = {
@@ -597,6 +813,7 @@ function render(room) {
   for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
   renderHand(match);
   renderClock(room);
+  renderDifficulty(room);
 }
 
 function renderNotice(match) {
@@ -653,6 +870,8 @@ function resetToLobby(message) {
   trick.innerHTML = "";
   $("hand").innerHTML = "";
   $("fx").innerHTML = "";
+  $("gestureLayer").innerHTML = "";
+  closeGesturePop();
   $("clock").classList.add("hidden");
   $("notice").classList.add("hidden");
   $("table").classList.add("hidden");
@@ -695,6 +914,15 @@ $("soundBtn").addEventListener("click", () => {
   if (soundOn) playTurnChime();
 });
 document.querySelector(".board").addEventListener("click", (event) => {
+  const avatar = event.target.closest(".avatar[data-seat]");
+  const holder = event.target.closest(".seat");
+  const picking = Boolean(holder && holder.classList.contains("pick"));
+  if (avatar && !picking) {
+    event.stopPropagation();
+    openGesturePop(Number(avatar.dataset.seat), avatar);
+    return;
+  }
+  closeGesturePop();
   const node = event.target.closest(".seat.pick");
   if (!node || state?.match) return;
   socket.emit("sit", { seat: Number(node.dataset.seat) });
@@ -710,6 +938,91 @@ $("playBtn").addEventListener("click", () => {
 $("passBtn").addEventListener("click", () => socket.emit("pass"));
 $("groupBtn").addEventListener("click", groupSelected);
 $("hintBtn").addEventListener("click", () => socket.emit("hint"));
+
+/* ---------------- appearance panel and bot strength ---------------- */
+const DIFF_LEVELS = ["easy", "medium", "hard"];
+
+function renderDifficulty(room) {
+  const group = $("diffGroup");
+  if (!group) return;
+  const match = room?.match;
+  const live = Boolean(match && match.phase !== "matchOver");
+  group.classList.toggle("hidden", live);
+  const level = DIFF_LEVELS.includes(room?.difficulty) ? room.difficulty : "hard";
+  const host = Boolean(room?.youHost);
+  for (const btn of group.querySelectorAll(".seg")) {
+    const on = btn.dataset.diff === level;
+    btn.classList.toggle("on", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.disabled = !host || live;
+  }
+}
+
+function previewFace(suit, rank, red) {
+  return '<span class="card opt-card' + (red ? " red" : "") + '">' +
+    '<span class="corner"><strong>' + rank + "</strong><small>" + suit + "</small></span>" +
+    '<span class="pip">' + suit + "</span></span>";
+}
+
+function buildSettings() {
+  const skinRow = $("cardSkins");
+  const feltRow = $("feltColors");
+  if (!skinRow || !feltRow) return;
+  skinRow.textContent = "";
+  feltRow.textContent = "";
+  for (const skin of CARD_SKINS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "opt";
+    btn.dataset.skin = skin.id;
+    btn.dataset.cardSkin = skin.id;
+    btn.title = skin.name;
+    btn.innerHTML = '<span class="opt-face">' + previewFace(SUIT.S, "A", false) + previewFace(SUIT.H, "A", true) +
+      "</span><span>" + skin.name + "</span>";
+    btn.addEventListener("click", () => setCardSkin(skin.id));
+    skinRow.appendChild(btn);
+  }
+  for (const felt of FELTS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "opt";
+    btn.dataset.felt = felt.id;
+    btn.title = felt.name;
+    btn.innerHTML = '<span class="opt-felt" data-felt="' + felt.id + '"></span><span>' + felt.name + "</span>";
+    btn.addEventListener("click", () => setFelt(felt.id));
+    feltRow.appendChild(btn);
+  }
+  applyAppearance();
+}
+
+function closeSettings() {
+  $("settingsPanel").classList.add("hidden");
+}
+
+function openSettings() {
+  closeGesturePop();
+  $("settingsPanel").classList.remove("hidden");
+}
+
+$("settingsBtn").addEventListener("click", openSettings);
+$("lobbySettingsBtn").addEventListener("click", openSettings);
+$("settingsClose").addEventListener("click", closeSettings);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  closeSettings();
+  closeGesturePop();
+});
+document.addEventListener("click", (event) => {
+  if (event.target.closest("#settingsPanel, #settingsBtn, #lobbySettingsBtn")) return;
+  closeSettings();
+});
+for (const btn of document.querySelectorAll("#diffGroup .seg")) {
+  btn.addEventListener("click", () => {
+    if (btn.disabled) return;
+    socket.emit("setDifficulty", { level: btn.dataset.diff });
+  });
+}
+buildSettings();
 
 function rejoinSavedRoom() {
   const session = readSession();
@@ -742,3 +1055,11 @@ socket.on("hint", ({ cardIds, action, reason, index, total }) => {
   if (state) render(state);
   if (reason) toast(total > 1 ? reason + " (" + index + "/" + total + ")" : reason);
 });
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("#gesturePop")) return;
+  closeGesturePop();
+});
+window.addEventListener("resize", closeGesturePop);
+window.addEventListener("scroll", closeGesturePop, true);
+socket.on("gesture", ({ from, to, kind, by } = {}) => playGesture(from, to, kind, by));

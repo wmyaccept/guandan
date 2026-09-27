@@ -6,10 +6,11 @@
   <meta name="theme-color" content="#0c4a34" />
   <link rel="preload" as="image" href="/lobby-hero.jpg?v=7" />
   <title>掼蛋桌</title>
-  <link rel="stylesheet" href="/styles.css?v=9" />
+  <link rel="stylesheet" href="/styles.css?v=12" />
 </head>
 <body>
   <div id="lobby" class="lobby">
+    <button type="button" id="lobbySettingsBtn" class="icon lobby-gear" title="外观设置" aria-label="外观设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <section class="lobby-scene">
       <img class="lobby-hero" src="/lobby-hero.jpg?v=7" alt="" draggable="false" />
       <div class="lobby-veil"></div>
@@ -62,6 +63,13 @@
             <svg class="ic-off" viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
           </button>
         </div>
+        <button type="button" id="settingsBtn" class="icon" title="外观设置" aria-label="外观设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        <div id="diffGroup" class="seg-group" role="group" aria-label="机器人强度">
+          <span class="seg-cap">人机</span>
+          <button type="button" class="seg" data-diff="easy" title="不看队友，乱用炸弹">简单</button>
+          <button type="button" class="seg" data-diff="medium" title="会算牌，但不顾队友">中等</button>
+          <button type="button" class="seg" data-diff="hard" title="配合队友，会拦牌">强力</button>
+        </div>
         <button type="button" id="botBtn">补机器人</button>
         <button type="button" id="startBtn">开局</button>
         <button type="button" id="leaveBtn" class="ghost quit" title="回到主页">
@@ -74,6 +82,10 @@
 
     <section class="felt">
       <div class="board">
+        <div class="board-decor" aria-hidden="true">
+          <span class="decor-ring"></span>
+          <span class="decor-mark">掼蛋</span>
+        </div>
         <article class="seat seat-top" data-view="2"></article>
         <article class="seat seat-left" data-view="3"></article>
         <article class="seat seat-right" data-view="1"></article>
@@ -99,10 +111,25 @@
     </section>
 
     <div id="fx" class="fx"></div>
+    <div id="gestureLayer" class="gesture-layer" aria-hidden="true"></div>
+    <div id="gesturePop" class="gesture-pop hidden" role="menu"></div>
     <p id="toast" class="toast hidden"></p>
   </div>
 
+  <div id="settingsPanel" class="settings hidden" role="dialog" aria-label="外观设置">
+    <div class="settings-head">
+      <span>外观设置</span>
+      <button type="button" id="settingsClose" class="icon" title="关闭" aria-label="关闭"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    <div class="settings-body">
+      <p class="settings-label">牌面</p>
+      <div id="cardSkins" class="opt-row"></div>
+      <p class="settings-label">桌布</p>
+      <div id="feltColors" class="opt-row"></div>
+    </div>
+  </div>
+
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=9"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>
