@@ -4,7 +4,7 @@ import { autoAct, createMatch, levelRankOf, playCards, passTurn, publicState, re
 const rooms = new Map();
 const socketRoom = new Map();
 const BOT_DELAY_MS = 2800;
-const TURN_LIMIT_MS = 30000;
+const TURN_LIMIT_MS = 60000;
 const ROOM_GRACE_MS = 10 * 60 * 1000;
 const GESTURE_COOLDOWN_MS = 1200;
 const GESTURES = new Set(["egg", "flower"]);

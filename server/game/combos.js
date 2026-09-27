@@ -1,4 +1,4 @@
-import { isHeartLevel, isJoker, pointValue, rankValue } from "./cards.js";
+import { SEQ_TOP, isHeartLevel, isJoker, pointValue, rankAtPosition, rankValue } from "./cards.js";
 
 export const TYPES = {
   SINGLE: "single",
@@ -141,13 +141,14 @@ function tryBomb(cards, counts, wilds) {
 function tryRun(cards, counts, wilds, copies, runLen, type) {
   if (cards.length !== copies * runLen) return null;
   if (Object.keys(counts).some((rank) => Number(rank) >= 16 && counts[rank] > 0)) return null;
-  if (counts[15] > 0) return null;
-  for (let start = 3; start <= 15 - runLen; start += 1) {
+  // combo.rank 记的是这手连牌的最高“位置”，A 当小时最高位是 5，所以
+  // A2345 < 23456 < ... < 10JQKA，比较时不会被级牌抬起来。
+  for (let start = 1; start + runLen - 1 <= SEQ_TOP; start += 1) {
     const consume = {};
     let need = 0;
     let valid = true;
     for (let offset = 0; offset < runLen; offset += 1) {
-      const rank = start + offset;
+      const rank = rankAtPosition(start + offset);
       const have = counts[rank] ?? 0;
       if (have > copies) {
         valid = false;
@@ -166,17 +167,19 @@ function tryRun(cards, counts, wilds, copies, runLen, type) {
 
 function tryFullHouse(cards, counts, wilds) {
   if (cards.length !== 5) return null;
-  if (counts[16] || counts[17]) return null;
   for (let triple = 3; triple <= 15; triple += 1) {
-    for (let pair = 3; pair <= 15; pair += 1) {
+    // 带的一对可以是一对王（小王小王 / 大王大王），王必须是真牌，逢人配变不出来
+    for (let pair = 3; pair <= 17; pair += 1) {
       if (triple === pair) continue;
+      const havePair = counts[pair] ?? 0;
+      if (pair >= 16 && havePair !== 2) continue;
       const needTriple = Math.max(0, 3 - (counts[triple] ?? 0));
-      const needPair = Math.max(0, 2 - (counts[pair] ?? 0));
-      if ((counts[triple] ?? 0) > 3 || (counts[pair] ?? 0) > 2) continue;
+      const needPair = Math.max(0, 2 - havePair);
+      if ((counts[triple] ?? 0) > 3 || havePair > 2) continue;
       if (needTriple + needPair > wilds) continue;
       if (leftoverNaturals(counts, {
         [triple]: Math.min(3, counts[triple] ?? 0),
-        [pair]: Math.min(2, counts[pair] ?? 0)
+        [pair]: Math.min(2, havePair)
       })) {
         return combo(TYPES.FULL_HOUSE, cards, triple, { copies: 3 });
       }
@@ -187,7 +190,7 @@ function tryFullHouse(cards, counts, wilds) {
 
 function tryFlushStraight(cards, counts, wilds, naturalCards) {
   if (cards.length !== 5) return null;
-  if (naturalCards.some(isJoker) || counts[15] > 0) return null;
+  if (naturalCards.some(isJoker)) return null;
   const suitGroups = { S: 0, H: 0, D: 0, C: 0 };
   for (const card of naturalCards) suitGroups[card.suit] += 1;
   const usedSuits = Object.entries(suitGroups).filter(([, n]) => n > 0);

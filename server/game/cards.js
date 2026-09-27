@@ -68,9 +68,25 @@ export function isLevelCard(card, levelRank) {
   return card.rank === levelRank;
 }
 
-export function sequenceRank(card) {
-  if (card.rank >= 3 && card.rank <= 14) return card.rank;
+// 顺子/木板/钢板 走自然阶梯：A 可以当最小（A2345）也可以当最大（10JQKA），
+// 普通 2 保留自己的自然位置，所以 A2345、223344、AAA222 都是合法牌型。
+export const SEQ_TOP = 14;
+
+export function seqPosition(rank) {
+  if (rank >= 3 && rank <= 14) return rank;
+  if (rank === 15) return 2;
   return null;
+}
+
+export function rankAtPosition(position) {
+  if (position === 1) return 14;
+  if (position === 2) return 15;
+  if (position >= 3 && position <= SEQ_TOP) return position;
+  return null;
+}
+
+export function sequenceRank(card) {
+  return seqPosition(card.rank);
 }
 
 // Guandan order from weak to strong: 2, 3..K, A, level card, small joker,

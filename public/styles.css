@@ -1470,3 +1470,79 @@ body { overscroll-behavior-y: none; }
   cursor: default;
 }
 .opt-face .card + .card { margin-left: -0.85em; }
+
+/* ---------------- 记牌器与队友视角 ---------------- */
+.counter {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  z-index: 4;
+  width: 208px;
+  padding: 6px 7px 7px;
+  border: 1px solid rgba(227, 195, 111, 0.42);
+  border-radius: 8px;
+  background: rgba(8, 14, 11, 0.74);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  pointer-events: none;
+}
+.counter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 5px;
+  color: var(--gold);
+  font-size: 12px;
+  letter-spacing: 0.4px;
+}
+.counter-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+}
+.counter-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(243, 238, 227, 0.05);
+  color: var(--ivory);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.counter-cell i { font-style: normal; opacity: 0.85; }
+.counter-cell b { font-variant-numeric: tabular-nums; }
+.counter-cell.lv {
+  border-color: rgba(227, 195, 111, 0.6);
+  background: rgba(227, 195, 111, 0.16);
+  color: var(--gold);
+}
+.counter-cell.big { border-color: rgba(227, 195, 111, 0.34); }
+.counter-cell.out { opacity: 0.3; }
+#counterBtn.on,
+#spectateBtn.on {
+  background: rgba(227, 195, 111, 0.24);
+  border-color: rgba(227, 195, 111, 0.55);
+  color: var(--gold);
+}
+.hand-wrap.spectating #hand { filter: saturate(0.9); }
+.self-status .tag {
+  padding: 1px 8px;
+  border: 1px solid rgba(227, 195, 111, 0.5);
+  border-radius: 999px;
+  color: var(--gold);
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .counter { width: 176px; left: 6px; bottom: 6px; }
+  .counter-cell { font-size: 10px; padding: 1px 3px; }
+}
+@media (max-width: 560px) {
+  .counter { width: 148px; }
+  .counter-head { font-size: 11px; }
+  .counter-cell { font-size: 9px; gap: 1px; }
+}

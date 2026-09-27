@@ -1,5 +1,5 @@
-import { isHeartLevel, pointValue, rankValue } from "./cards.js";
-import { TYPES, bombPower, comboLabel } from "./combos.js";
+import { isHeartLevel, pointValue, rankAtPosition, rankValue } from "./cards.js";
+import { TYPES, bombPower, comboLabel, parseCombos } from "./combos.js";
 import { generatePlays } from "./moves.js";
 
 export const DIFFICULTIES = ["easy", "medium", "hard"];
@@ -8,6 +8,17 @@ const RANKS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 const BOMB_RANKS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 const SEQ_MAX = 14;
 const SUITS = ["S", "H", "D", "C"];
+
+// Runs live on the position axis: 1=A(low), 2=the two, 3..14=3..A. The ace
+// owns both position 14 and position 1, so try the ordinary starts first and
+// leave ace-low for last instead of breaking 10JQKA up to build A2345.
+function runStarts(runLen) {
+  const last = SEQ_MAX - runLen + 1;
+  const starts = [];
+  for (let start = 2; start <= last; start += 1) starts.push(start);
+  if (last >= 1) starts.push(1);
+  return starts;
+}
 const MAX_CANDIDATES = 160;
 const COPIES_BY_TYPE = {
   [TYPES.SINGLE]: 1,
@@ -150,10 +161,11 @@ function buildPlan(hand, levelRank, flushFirst) {
 
   const takeFlushStraights = () => {
     for (const suit of SUITS) {
-      for (let start = 3; start <= SEQ_MAX - 4; start += 1) {
+      for (const start of runStarts(5)) {
         const naturals = [];
         let gaps = 0;
-        for (let rank = start; rank <= start + 4; rank += 1) {
+        for (let offset = 0; offset < 5; offset += 1) {
+          const rank = rankAtPosition(start + offset);
           const card = pool[rank].find((item) => item.suit === suit);
           if (card) naturals.push(card);
           else gaps += 1;
@@ -171,28 +183,24 @@ function buildPlan(hand, levelRank, flushFirst) {
 
   const takeRuns = (copies, minRun, maxRun, type) => {
     for (let run = maxRun; run >= minRun; run -= 1) {
-      let start = 3;
-      while (start + run - 1 <= SEQ_MAX) {
+      for (const start of runStarts(run)) {
         const plan = [];
         let need = 0;
-        for (let rank = start; rank <= start + run - 1; rank += 1) {
+        for (let offset = 0; offset < run; offset += 1) {
+          const rank = rankAtPosition(start + offset);
           const have = Math.min(copies, pool[rank].length);
           plan.push(pool[rank].slice(0, have));
           need += copies - have;
         }
-        if (need > Math.min(1, wildPool.length)) {
-          start += 1;
-          continue;
-        }
+        if (need > Math.min(1, wildPool.length)) continue;
         const cards = [];
         for (let offset = 0; offset < run; offset += 1) {
-          const rank = start + offset;
+          const rank = rankAtPosition(start + offset);
           pool[rank] = pool[rank].slice(plan[offset].length);
           cards.push(...plan[offset]);
         }
         if (need) cards.push(...wildPool.splice(0, need));
         groups.push(makeGroup(type, cards, start + run - 1));
-        start += run;
       }
     }
   };
@@ -321,6 +329,16 @@ function dedupe(plays, levelRank) {
   return [...best.values()].slice(0, MAX_CANDIDATES);
 }
 
+// 五张同花色连牌既能当同花顺（炸弹）也能当普通顺子出。按“这手牌本身能当
+// 炸弹”计价，机器人才不会把同花顺拆成顺子白送出去。
+function effectiveBombPower(combo, levelRank) {
+  const own = bombPower(combo);
+  if (own || combo.cards.length < 4) return own;
+  let best = 0;
+  for (const item of parseCombos(combo.cards, levelRank)) best = Math.max(best, bombPower(item));
+  return best;
+}
+
 function buildContext(match, seat, levelRank, profile) {
   const hand = match.hands[seat];
   const handsCount = match.hands.map((item) => item.length);
@@ -333,6 +351,7 @@ function buildContext(match, seat, levelRank, profile) {
   const base = naive ? NAIVE_BASE : decompose(hand, levelRank);
   const candidates = dedupe(generatePlays(hand, levelRank, current), levelRank).map((combo) => ({
     c: combo,
+    bp: effectiveBombPower(combo, levelRank),
     st: naive ? NO_STRUCT : structureOfCards(hand, combo.cards, base, levelRank)
   }));
   const winnerCount = winnerSeat == null ? 0 : handsCount[winnerSeat];
@@ -365,9 +384,9 @@ function buildContext(match, seat, levelRank, profile) {
   };
 }
 
-function leadScore({ c, st }, ctx) {
+function leadScore({ c, st, bp }, ctx) {
   const { levelRank, base, myCount, unseen, profile } = ctx;
-  const power = bombPower(c);
+  const power = bp ?? bombPower(c);
   let score = 0;
   score -= W.structTrick * st.tricks;
   score -= W.structBomb * st.bombLoss;
@@ -418,7 +437,7 @@ function lead(ctx, order) {
   // Partner is about to go out: feed them exactly what they can play.
   if (profile.feedPartner && partnerCount > 0 && partnerCount <= 2) {
     const fit = order
-      .filter(({ item }) => !bombPower(item.c) && item.c.length === partnerCount)
+      .filter(({ item }) => !item.bp && item.c.length === partnerCount)
       .sort((a, b) => rankValue(a.item.c.rank, levelRank) - rankValue(b.item.c.rank, levelRank));
     if (fit.length) return { action: "play", cardIds: cardIds(fit[0].item.c), reason: "送对家走", order };
   }
@@ -430,12 +449,12 @@ function follow(ctx, order) {
   const { current, winnerSeat, partner, levelRank, lastToAct, stopNeeded, myCount, profile } = ctx;
   if (profile.partnerAware && winnerSeat === partner) return { action: "pass", reason: "队友的牌", order };
 
-  const plain = order.filter(({ item }) => !bombPower(item.c));
+  const plain = order.filter(({ item }) => !item.bp);
   const bombs = order
-    .filter(({ item }) => bombPower(item.c))
+    .filter(({ item }) => item.bp)
     .sort(
       (a, b) =>
-        bombPower(a.item.c) - bombPower(b.item.c) ||
+        a.item.bp - b.item.bp ||
         a.item.st.bombLoss - b.item.st.bombLoss ||
         rankValue(a.item.c.rank, levelRank) - rankValue(b.item.c.rank, levelRank)
     );
@@ -472,6 +491,9 @@ function easyDecide(ctx, rng) {
   const { levelRank, current, myCount } = ctx;
   const options = ctx.candidates.map((entry) => entry.c);
   if (!options.length) return { action: "pass", reason: "压不住", order: [] };
+  // 简单档也会乱炸，但不会把同花顺拆成顺子白送
+  const bpOf = new Map(ctx.candidates.map((entry) => [entry.c, entry.bp]));
+  const pow = (combo) => bpOf.get(combo) ?? bombPower(combo);
 
   const cheap = options
     .slice()
@@ -479,7 +501,7 @@ function easyDecide(ctx, rng) {
       (a, b) =>
         rankValue(a.rank, levelRank) - rankValue(b.rank, levelRank) ||
         a.length - b.length ||
-        bombPower(a) - bombPower(b)
+        pow(a) - pow(b)
     );
 
   const goingOut = cheap.find((combo) => combo.length === myCount);
@@ -487,14 +509,14 @@ function easyDecide(ctx, rng) {
 
   if (!current) {
     // Jitter among the three cheapest plain cards so it is not a fixed script.
-    const plain = cheap.filter((combo) => !bombPower(combo) && combo.length <= 2);
+    const plain = cheap.filter((combo) => !pow(combo) && combo.length <= 2);
     const pool = (plain.length ? plain : cheap).slice(0, 3);
     const pick = pool[Math.floor(rng() * pool.length) % pool.length];
     return { action: "play", cardIds: cardIds(pick), reason: "领出" + comboLabel(pick), order: [] };
   }
 
-  const winners = cheap.filter((combo) => !bombPower(combo));
-  const bombs = cheap.filter((combo) => bombPower(combo));
+  const winners = cheap.filter((combo) => !pow(combo));
+  const bombs = cheap.filter((combo) => pow(combo));
   if (winners.length) {
     if (rng() < 0.18) return { action: "pass", reason: "先不要", order: [] };
     return { action: "play", cardIds: cardIds(winners[0]), reason: "压上家", order: [] };

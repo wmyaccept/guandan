@@ -4,6 +4,10 @@ const selected = new Set();
 let state = null;
 let you = -1;
 let handPiles = [];
+let handOwner = null;
+const pilesByOwner = new Map();
+let spectateOn = false;
+let spectatingNow = false;
 let displayed = null;
 let stateQueue = [];
 let lastRevealAt = 0;
@@ -32,6 +36,7 @@ const SESSION_KEY = "guandan-session";
 const TOKEN_KEY = "guandan-token";
 const ZOOM_KEY = "guandan-zoom";
 const SOUND_KEY = "guandan-sound";
+const COUNTER_KEY = "guandan-counter";
 const ZOOM_MIN = 0.7;
 const ZOOM_MAX = 1.6;
 const ZOOM_STEP = 0.1;
@@ -44,6 +49,7 @@ function clampZoom(value) {
 
 let zoom = clampZoom(localStorage.getItem(ZOOM_KEY) || 1);
 let soundOn = localStorage.getItem(SOUND_KEY) !== "off";
+let counterOn = localStorage.getItem(COUNTER_KEY) === "on";
 
 function applyZoom() {
   document.documentElement.style.setProperty("--zoom", String(zoom));
@@ -60,6 +66,13 @@ function setZoom(value) {
 function applySound() {
   $("soundBtn").classList.toggle("muted", !soundOn);
   $("soundBtn").setAttribute("aria-pressed", soundOn ? "true" : "false");
+}
+
+function applyCounter() {
+  const btn = $("counterBtn");
+  if (!btn) return;
+  btn.classList.toggle("on", counterOn);
+  btn.setAttribute("aria-pressed", counterOn ? "true" : "false");
 }
 
 /* ---------------- appearance: card skin and table cloth ---------------- */
@@ -197,10 +210,106 @@ function playTurnChime() {
   if (navigator.vibrate) navigator.vibrate([50, 40, 60]);
 }
 
+/* ---------------- combo sounds: cloth slap plus a flourish per shape ---------------- */
+let noiseBuffer = null;
+
+function makeNoise(ctx) {
+  if (noiseBuffer) return noiseBuffer;
+  const len = Math.floor(ctx.sampleRate * 0.4);
+  noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+  for (let i = 0; i < len; i += 1) data[i] = Math.random() * 2 - 1;
+  return noiseBuffer;
+}
+
+function noiseHit(ctx, at, dur, peak, freq, kind) {
+  const src = ctx.createBufferSource();
+  src.buffer = makeNoise(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = kind || "bandpass";
+  filter.frequency.value = freq;
+  filter.Q.value = 0.7;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  src.start(at);
+  src.stop(at + dur + 0.03);
+}
+
+function toneHit(ctx, at, freq, dur, peak, kind) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = kind || "triangle";
+  osc.frequency.setValueAtTime(freq, at);
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + 0.018);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + dur + 0.03);
+}
+
+function sweepDown(ctx, at, from, to, dur, peak) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(from, at);
+  osc.frequency.exponentialRampToValueAtTime(to, at + dur);
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur + 0.08);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + dur + 0.12);
+}
+
+const RUN_STEPS = [0, 3, 7, 10, 14, 17, 20, 24];
+
+function playComboSound(combo) {
+  if (!soundOn || !combo) return;
+  const ctx = ensureAudio();
+  if (!ctx) return;
+  const at = ctx.currentTime + 0.01;
+  const size = combo.cards?.length ?? 1;
+  noiseHit(ctx, at, 0.12, size >= 5 ? 0.3 : 0.2, 1800, "bandpass");
+  const type = combo.type;
+  if (type === "straight" || type === "pairseq" || type === "tripleseq") {
+    const copies = type === "tripleseq" ? 3 : type === "pairseq" ? 2 : 1;
+    const steps = Math.min(RUN_STEPS.length, Math.max(3, Math.round(size / copies)));
+    for (let i = 0; i < steps; i += 1) {
+      toneHit(ctx, at + 0.05 + i * 0.07, 392 * Math.pow(2, RUN_STEPS[i] / 12), 0.2, 0.13, "triangle");
+    }
+  } else if (type === "flushstraight") {
+    [0, 5, 9, 12, 17].forEach((semi, i) => {
+      toneHit(ctx, at + 0.05 + i * 0.055, 523.25 * Math.pow(2, semi / 12), 0.36, 0.11, "sine");
+    });
+  } else if (type === "fullhouse") {
+    toneHit(ctx, at + 0.06, 349.23, 0.2, 0.15, "triangle");
+    toneHit(ctx, at + 0.2, 523.25, 0.28, 0.15, "triangle");
+  } else if (type === "bomb") {
+    const big = size >= 6;
+    sweepDown(ctx, at, big ? 200 : 155, 46, big ? 0.55 : 0.4, big ? 0.5 : 0.36);
+    noiseHit(ctx, at, big ? 0.42 : 0.3, big ? 0.3 : 0.22, 240, "lowpass");
+  } else if (type === "jokerbomb") {
+    sweepDown(ctx, at, 250, 36, 0.78, 0.55);
+    noiseHit(ctx, at, 0.5, 0.34, 190, "lowpass");
+    [0, 7, 12, 19].forEach((semi, i) => {
+      toneHit(ctx, at + 0.1 + i * 0.05, 784 * Math.pow(2, semi / 12), 0.42, 0.09, "sine");
+    });
+  }
+}
+
 const savedSession = readSession();
 if (savedSession) $("code").value = savedSession.code;
 applyZoom();
 applySound();
+applyCounter();
 applyAppearance();
 ["pointerdown", "keydown"].forEach((evt) => {
   window.addEventListener(evt, () => ensureAudio(), { once: true });
@@ -280,6 +389,10 @@ function syncPiles(cards) {
 }
 
 function groupSelected() {
+  if (spectatingNow) {
+    toast("看队友的牌时不能组牌");
+    return;
+  }
   const ids = [];
   for (const pile of handPiles) {
     for (const id of pile) if (selected.has(id)) ids.push(id);
@@ -361,7 +474,9 @@ function renderSelf(room) {
   const person = room.seats[seat];
   const match = room.match;
   const remain = remainLabel(match?.handsCount?.[seat] ?? 0);
-  el.innerHTML = "<b>" + escapeHtml(person?.name ?? "") + "</b>" + (remain ? "<span>" + remain + "</span>" : "");
+  const watch = spectatingNow ? spectateInfo(match) : null;
+  const tag = watch ? '<span class="tag">正在看 ' + escapeHtml(watch.name ?? "队友") + " 的牌</span>" : "";
+  el.innerHTML = "<b>" + escapeHtml(person?.name ?? "") + "</b>" + (remain ? "<span>" + remain + "</span>" : "") + tag;
   el.classList.toggle("turn", Boolean(match && you === match.turn && (match.phase === "play" || match.phase === "returnTribute")));
 }
 
@@ -371,14 +486,115 @@ function toggleSelect(id, node) {
   node.classList.toggle("up", selected.has(id));
 }
 
+/* ---------------- partner view: watch your teammate once you are out ---------------- */
+function spectateInfo(match) {
+  const info = match?.spectate;
+  return info && Array.isArray(info.hand) && info.hand.length ? info : null;
+}
+
+function effectiveHand(match) {
+  if (spectateOn) {
+    const info = spectateInfo(match);
+    if (info) return info.hand;
+  }
+  return match?.hand ?? [];
+}
+
+function ownerKey(match) {
+  const info = spectateOn ? spectateInfo(match) : null;
+  return info ? "partner-" + info.seat : "self";
+}
+
+function updateSpectate(match) {
+  const btn = $("spectateBtn");
+  if (!btn) return false;
+  const info = match?.phase === "play" ? spectateInfo(match) : null;
+  const wrap = document.querySelector(".hand-wrap");
+  if (!info) {
+    spectateOn = false;
+    btn.classList.add("hidden");
+    btn.classList.remove("on");
+    btn.setAttribute("aria-pressed", "false");
+    wrap?.classList.remove("spectating");
+    return false;
+  }
+  btn.classList.remove("hidden");
+  btn.classList.toggle("on", spectateOn);
+  btn.setAttribute("aria-pressed", spectateOn ? "true" : "false");
+  btn.title = spectateOn ? "回到自己的视角" : "看 " + (info.name ?? "队友") + " 的牌";
+  wrap?.classList.toggle("spectating", spectateOn);
+  return spectateOn;
+}
+
+/* ---------------- card counter: ranks that have not shown up yet ---------------- */
+function counterOrder(levelRank) {
+  const order = [17, 16];
+  if (levelRank >= 3 && levelRank <= 15) order.push(levelRank);
+  for (let rank = 14; rank >= 3; rank -= 1) if (rank !== levelRank) order.push(rank);
+  if (levelRank !== 15) order.push(15);
+  return order;
+}
+
+function counterCounts(match) {
+  const counts = { ...(match?.remaining ?? {}) };
+  if (spectatingNow) {
+    for (const card of spectateInfo(match)?.hand ?? []) {
+      if (counts[card.rank] != null) counts[card.rank] = Math.max(0, counts[card.rank] - 1);
+    }
+  }
+  return counts;
+}
+
+function renderCounter(match) {
+  const panel = $("counter");
+  const btn = $("counterBtn");
+  if (!panel || !btn) return;
+  const live = Boolean(match && match.remaining && match.phase !== "matchOver");
+  btn.classList.toggle("hidden", !live);
+  if (!live || !counterOn) {
+    panel.classList.add("hidden");
+    return;
+  }
+  const counts = counterCounts(match);
+  const grid = $("counterGrid");
+  grid.textContent = "";
+  let unseen = 0;
+  for (const rank of counterOrder(match.levelRank)) {
+    const left = counts[rank] ?? 0;
+    unseen += left;
+    const cell = document.createElement("span");
+    const classes = ["counter-cell"];
+    if (rank >= 16) classes.push("big");
+    if (rank === match.levelRank) classes.push("lv");
+    if (!left) classes.push("out");
+    cell.className = classes.join(" ");
+    const name = document.createElement("i");
+    name.textContent = RANK[rank] ?? String(rank);
+    const num = document.createElement("b");
+    num.textContent = String(left);
+    cell.append(name, num);
+    grid.append(cell);
+  }
+  $("counterNote").textContent = "未见 " + unseen + " 张";
+  panel.classList.remove("hidden");
+}
+
 function renderHand(match) {
   const hand = $("hand");
   hand.innerHTML = "";
   if (!match) {
     handPiles = [];
+    handOwner = null;
     return;
   }
-  const cards = match.hand ?? [];
+  // each view keeps its own pile layout, so switching back restores your grouping
+  const key = ownerKey(match);
+  if (handOwner !== key) {
+    if (handOwner) pilesByOwner.set(handOwner, handPiles.map((pile) => pile.slice()));
+    handOwner = key;
+    handPiles = (pilesByOwner.get(key) ?? []).map((pile) => pile.slice());
+  }
+  const cards = effectiveHand(match);
   syncPiles(cards);
   const byId = new Map(cards.map((card) => [card.id, card]));
   handPiles.forEach((pile, index) => {
@@ -457,6 +673,7 @@ function bindHandDrag() {
   let drag = null;
 
   hand.addEventListener("pointerdown", (event) => {
+    if (spectatingNow) return;
     const node = event.target.closest(".card");
     if (!node || event.button !== 0) return;
     drag = {
@@ -679,6 +896,75 @@ function playComboFx(combo, seat) {
   shakeBoard(info.shake);
 }
 
+/* ---------------- table cards are re-sorted into rank order ---------------- */
+function comboValue(card, levelRank) {
+  if (card.rank === 17) return 18;
+  if (card.rank === 16) return 17;
+  if (card.rank === levelRank) return 16;
+  if (card.rank === 15) return 2;
+  return card.rank;
+}
+
+function runLength(combo) {
+  if (combo.run) return combo.run;
+  if (combo.type === "pairseq") return 3;
+  if (combo.type === "tripleseq") return 2;
+  return 5;
+}
+
+// The engine axis for runs: 1 = A low, 2 = the plain 2, 3..14 natural.
+function posRank(position) {
+  if (position === 1) return 14;
+  if (position === 2) return 15;
+  return position;
+}
+
+function sortRun(combo, cards, levelRank) {
+  const len = runLength(combo);
+  const copies = combo.type === "tripleseq" ? 3 : combo.type === "pairseq" ? 2 : 1;
+  const top = combo.rank;
+  const isWild = (card) => card.suit === "H" && card.rank === levelRank;
+  const naturals = cards.filter((card) => !isWild(card));
+  const wilds = cards.filter(isWild);
+  const slot = new Map();
+  let wildAt = 0;
+  for (let offset = 0; offset < len; offset += 1) {
+    const rank = posRank(top - len + 1 + offset);
+    const here = naturals.filter((card) => card.rank === rank);
+    for (const card of here) slot.set(card.id, offset);
+    for (let copy = here.length; copy < copies; copy += 1) {
+      const wild = wilds[wildAt];
+      if (!wild) break;
+      slot.set(wild.id, offset + 0.5);
+      wildAt += 1;
+    }
+  }
+  for (const card of cards) if (!slot.has(card.id)) slot.set(card.id, len + 1);
+  return cards.slice().sort((a, b) => slot.get(a.id) - slot.get(b.id) || String(a.suit).localeCompare(String(b.suit)));
+}
+
+function sortComboCards(combo, levelRank) {
+  const cards = combo.cards ?? [];
+  if (["straight", "pairseq", "tripleseq", "flushstraight"].includes(combo.type)) {
+    return sortRun(combo, cards, levelRank);
+  }
+  const byValue = (a, b) => comboValue(a, levelRank) - comboValue(b, levelRank) ||
+    String(a.suit).localeCompare(String(b.suit));
+  if (combo.type === "fullhouse") {
+    const same = cards.filter((card) => card.rank === combo.rank);
+    const wilds = cards.filter((card) => card.suit === "H" && card.rank === levelRank && card.rank !== combo.rank);
+    const triple = (same.length >= 3 ? same : [...same, ...wilds]).slice(0, 3);
+    const rest = cards.filter((card) => !triple.includes(card));
+    return [...triple.sort(byValue), ...rest.sort(byValue)];
+  }
+  if (combo.type === "bomb") {
+    const same = cards.filter((card) => card.rank === combo.rank);
+    const rest = cards.filter((card) => card.rank !== combo.rank);
+    return [...same.sort(byValue), ...rest.sort(byValue)];
+  }
+  return cards.slice().sort(byValue);
+}
+
 function renderTrick(match) {
   const trick = $("trick");
   const combo = match?.lastPlay?.combo;
@@ -694,13 +980,14 @@ function renderTrick(match) {
   trick.className = "trick fx-" + combo.type;
   trick.innerHTML = "";
   const group = FX_GROUP[combo.type] ?? 1;
-  combo.cards.forEach((card, index) => {
+  sortComboCards(combo, match.levelRank).forEach((card, index) => {
     const node = renderCard(card, match.levelRank);
     node.style.setProperty("--i", String(index));
     node.style.setProperty("--g", String(Math.floor(index / group)));
     trick.append(node);
   });
   playComboFx(combo, match.lastPlay.seat);
+  playComboSound(combo);
 }
 
 function renderClock(room) {
@@ -801,17 +1088,21 @@ function render(room) {
     $("startBtn").classList.toggle("hidden", Boolean(match) && match.phase !== "matchOver");
   $("nextBtn").classList.toggle("hidden", match?.phase !== "roundOver");
   $("botBtn").classList.toggle("hidden", Boolean(match) && match.phase !== "matchOver");
+  spectatingNow = updateSpectate(match);
   const myTurn = Boolean(match && you === match.turn && (match.phase === "play" || match.phase === "returnTribute"));
+  const canAct = myTurn && !spectatingNow;
   $("playBtn").textContent = match?.phase === "returnTribute" ? "\u8fd8\u8d21" : "\u51fa\u724c";
-  $("playBtn").disabled = !myTurn;
-  $("passBtn").disabled = !(match && myTurn && match.phase === "play" && match.current);
-  $("hintBtn").disabled = !myTurn;
+  $("playBtn").disabled = !canAct;
+  $("passBtn").disabled = !(match && canAct && match.phase === "play" && match.current);
+  $("hintBtn").disabled = !canAct;
+  $("groupBtn").disabled = spectatingNow;
   renderSeats(room);
   renderSelf(room);
   renderTrick(match);
-  const ids = new Set((match?.hand ?? []).map((card) => card.id));
+  const ids = new Set(effectiveHand(match).map((card) => card.id));
   for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
   renderHand(match);
+  renderCounter(match);
   renderClock(room);
   renderDifficulty(room);
 }
@@ -864,6 +1155,10 @@ function resetToLobby(message) {
   myTurnSeen = false;
   selected.clear();
   handPiles = [];
+  handOwner = null;
+  pilesByOwner.clear();
+  spectateOn = false;
+  spectatingNow = false;
   trickKey = "";
   const trick = $("trick");
   trick.className = "trick";
@@ -874,6 +1169,11 @@ function resetToLobby(message) {
   closeGesturePop();
   $("clock").classList.add("hidden");
   $("notice").classList.add("hidden");
+  $("counter").classList.add("hidden");
+  $("counterBtn").classList.add("hidden");
+  $("spectateBtn").classList.add("hidden");
+  $("spectateBtn").classList.remove("on");
+  document.querySelector(".hand-wrap")?.classList.remove("spectating");
   $("table").classList.add("hidden");
   $("lobby").classList.remove("hidden");
   $("lobbyError").textContent = message || "";
@@ -912,6 +1212,24 @@ $("soundBtn").addEventListener("click", () => {
   localStorage.setItem(SOUND_KEY, soundOn ? "on" : "off");
   applySound();
   if (soundOn) playTurnChime();
+});
+$("counterBtn").addEventListener("click", () => {
+  counterOn = !counterOn;
+  localStorage.setItem(COUNTER_KEY, counterOn ? "on" : "off");
+  applyCounter();
+  if (state) render(state);
+});
+$("spectateBtn").addEventListener("click", () => {
+  spectateOn = !spectateOn;
+  selected.clear();
+  if (state) render(state);
+  if (!state) return;
+  if (spectatingNow) {
+    const info = spectateInfo(state.match);
+    toast("正在看 " + (info?.name ?? "队友") + " 的牌");
+  } else {
+    toast("已回到自己的视角");
+  }
 });
 document.querySelector(".board").addEventListener("click", (event) => {
   const avatar = event.target.closest(".avatar[data-seat]");

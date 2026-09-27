@@ -55,8 +55,58 @@ test("joker bomb beats six bomb", () => {
   assert.equal(canBeat(six, jokers), false);
 });
 
-test("two cannot sit in a straight", () => {
-  assert.equal(parseCombo(cards("SA", "H15", "S3", "S4", "S5"), 7), null);
+test("runs follow the natural ladder, so A2345 is the weakest straight", () => {
+  const aceLow = parseCombo(cards("SA", "H15", "S3", "D4", "C5"), 7);
+  assert.equal(aceLow.type, TYPES.STRAIGHT);
+  assert.equal(aceLow.rank, 5);
+  const plain = parseCombo(cards("S3", "H4", "D5", "C6", "S7"), 7);
+  assert.equal(canBeat(plain, aceLow), true);
+  const aceHigh = parseCombo(cards("S10", "HJ", "DQ", "CK", "SA"), 7);
+  assert.equal(aceHigh.type, TYPES.STRAIGHT);
+  assert.equal(aceHigh.rank, 14);
+  assert.equal(canBeat(aceHigh, plain), true);
+  // 2 only sits right after A; JQKA2 is not a run and jokers never join one
+  assert.equal(parseCombo(cards("SJ", "HQ", "DK", "CA", "S15"), 7), null);
+  assert.equal(parseCombo(cards("J16", "J16", "S3", "S4", "S5"), 7), null);
+});
+
+test("level card keeps its natural slot inside runs", () => {
+  const plate = parseCombo(cards("S15", "H15", "S3", "H3", "S4", "H4"), 14);
+  assert.equal(plate.type, TYPES.PAIR_SEQ);
+  assert.equal(plate.rank, 4);
+  const higher = parseCombo(cards("S5", "H5", "S6", "H6", "S7", "H7"), 14);
+  assert.equal(canBeat(higher, plate), true);
+  const lowSteel = parseCombo(cards("S14", "H14", "D14", "S15", "H15", "D15"), 7);
+  assert.equal(lowSteel.type, TYPES.TRIPLE_SEQ);
+  assert.equal(lowSteel.rank, 2);
+  const steel = parseCombo(cards("S13", "H13", "D13", "S14", "H14", "D14"), 7);
+  assert.equal(steel.type, TYPES.TRIPLE_SEQ);
+  assert.equal(steel.rank, 14);
+  assert.equal(canBeat(steel, lowSteel), true);
+  const hand = [
+    makeCard(0, "S", 15), makeCard(1, "S", 15),
+    makeCard(0, "S", 3), makeCard(1, "S", 3),
+    makeCard(0, "S", 4), makeCard(1, "S", 4)
+  ];
+  assert.ok(
+    generatePlays(hand, 14).some((item) => item.type === TYPES.PAIR_SEQ),
+    "playing A should still generate the 223344 pair run"
+  );
+});
+
+test("full house can carry a joker pair", () => {
+  const small = parseCombo(cards("S3", "H3", "D3", "J16", "J16"), 15);
+  assert.equal(small.type, TYPES.FULL_HOUSE);
+  assert.equal(small.rank, 3);
+  const big = parseCombo(cards("S9", "H9", "D9", "J17", "J17"), 15);
+  assert.equal(big.type, TYPES.FULL_HOUSE);
+  assert.equal(canBeat(big, small), true);
+  assert.equal(canBeat(small, big), false);
+  const wildOnTriple = parseCombo(cards("S9", "H9", "J17", "J17", "H15"), 15);
+  assert.equal(wildOnTriple.type, TYPES.FULL_HOUSE);
+  assert.equal(wildOnTriple.rank, 9);
+  const wildAsJoker = parseCombo(cards("S9", "H9", "D9", "J17", "H15"), 15);
+  assert.equal(wildAsJoker?.type === TYPES.FULL_HOUSE, false);
 });
 
 test("same type must be longer equal and higher", () => {

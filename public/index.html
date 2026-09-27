@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0c4a34" />
   <link rel="preload" as="image" href="/lobby-hero.jpg?v=7" />
   <title>掼蛋桌</title>
-  <link rel="stylesheet" href="/styles.css?v=12" />
+  <link rel="stylesheet" href="/styles.css?v=13" />
 </head>
 <body>
   <div id="lobby" class="lobby">
@@ -58,6 +58,12 @@
           <button type="button" id="zoomInBtn" class="icon" title="放大" aria-label="放大">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           </button>
+          <button type="button" id="counterBtn" class="icon hidden" title="记牌器" aria-label="记牌器" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3.5" y1="6" x2="3.51" y2="6"/><line x1="3.5" y1="12" x2="3.51" y2="12"/><line x1="3.5" y1="18" x2="3.51" y2="18"/></svg>
+          </button>
+          <button type="button" id="spectateBtn" class="icon hidden" title="队友视角" aria-label="队友视角" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
           <button type="button" id="soundBtn" class="icon" title="提示音开关" aria-label="提示音开关">
             <svg class="ic-on" viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
             <svg class="ic-off" viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
@@ -82,6 +88,10 @@
 
     <section class="felt">
       <div class="board">
+        <div id="counter" class="counter hidden">
+          <div class="counter-head"><span>记牌器</span><span id="counterNote">未见 0 张</span></div>
+          <div id="counterGrid" class="counter-grid"></div>
+        </div>
         <div class="board-decor" aria-hidden="true">
           <span class="decor-ring"></span>
           <span class="decor-mark">掼蛋</span>
@@ -130,6 +140,6 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=12"></script>
+  <script src="/app.js?v=13"></script>
 </body>
 </html>

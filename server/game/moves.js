@@ -1,4 +1,4 @@
-import { isHeartLevel, isJoker } from "./cards.js";
+import { SEQ_TOP, isHeartLevel, isJoker, rankAtPosition } from "./cards.js";
 import { TYPES, parseCombo, canBeat, bombPower } from "./combos.js";
 
 function byRankMap(hand) {
@@ -53,6 +53,7 @@ export function generatePlays(hand, levelRank, current = null) {
   const out = [];
   const seen = new Set();
   const wilds = hand.filter((card) => isHeartLevel(card, levelRank));
+  const noWild = [];
   const byRank = byRankMap(hand);
 
   const consider = (cards, preferred) => pushCombo(out, seen, cards, levelRank, current, preferred);
@@ -74,23 +75,24 @@ export function generatePlays(hand, levelRank, current = null) {
   if (big.length >= 2) consider(big.slice(0, 2));
 
   for (let triple = 3; triple <= 15; triple += 1) {
-    for (let pair = 3; pair <= 15; pair += 1) {
+    // 带的一对可以是一对王，王只能由真牌凑，逢人配变不出来
+    for (let pair = 3; pair <= 17; pair += 1) {
       if (triple === pair) continue;
       const used = new Set();
       const t = takeCards(byRank, wilds, triple, 3, used);
       if (!t) continue;
-      const p = takeCards(byRank, wilds, pair, 2, withUsed(used, t));
+      const p = takeCards(byRank, pair >= 16 ? noWild : wilds, pair, 2, withUsed(used, t));
       if (!p) continue;
       consider(t.concat(p), TYPES.FULL_HOUSE);
     }
   }
 
-  for (let start = 3; start <= 10; start += 1) {
+  for (let start = 1; start + 4 <= SEQ_TOP; start += 1) {
     const used = new Set();
     const cards = [];
     let ok = true;
-    for (let rank = start; rank < start + 5; rank += 1) {
-      const piece = takeCards(byRank, wilds, rank, 1, used);
+    for (let position = start; position < start + 5; position += 1) {
+      const piece = takeCards(byRank, wilds, rankAtPosition(position), 1, used);
       if (!piece) {
         ok = false;
         break;
@@ -102,12 +104,12 @@ export function generatePlays(hand, levelRank, current = null) {
   }
 
   for (const suit of ["S", "H", "D", "C"]) {
-    for (let start = 3; start <= 10; start += 1) {
+    for (let start = 1; start + 4 <= SEQ_TOP; start += 1) {
       const used = new Set();
       const cards = [];
       let ok = true;
-      for (let rank = start; rank < start + 5; rank += 1) {
-        const exact = findSuitRank(hand, suit, rank, used);
+      for (let position = start; position < start + 5; position += 1) {
+        const exact = findSuitRank(hand, suit, rankAtPosition(position), used);
         const wild = wilds.find((card) => !used.has(card.id) && card !== exact);
         const pick = exact ?? wild;
         if (!pick) {
@@ -122,41 +124,37 @@ export function generatePlays(hand, levelRank, current = null) {
   }
 
   // House rule: a pair sequence is exactly three pairs (six cards).
-  for (let run = 3; run <= 3; run += 1) {
-    for (let start = 3; start <= 15 - run; start += 1) {
-      const used = new Set();
-      const cards = [];
-      let ok = true;
-      for (let rank = start; rank < start + run; rank += 1) {
-        const piece = takeCards(byRank, wilds, rank, 2, used);
-        if (!piece) {
-          ok = false;
-          break;
-        }
-        piece.forEach((card) => used.add(card.id));
-        cards.push(...piece);
+  for (let start = 1; start + 2 <= SEQ_TOP; start += 1) {
+    const used = new Set();
+    const cards = [];
+    let ok = true;
+    for (let position = start; position < start + 3; position += 1) {
+      const piece = takeCards(byRank, wilds, rankAtPosition(position), 2, used);
+      if (!piece) {
+        ok = false;
+        break;
       }
-      if (ok) consider(cards, TYPES.PAIR_SEQ);
+      piece.forEach((card) => used.add(card.id));
+      cards.push(...piece);
     }
+    if (ok) consider(cards, TYPES.PAIR_SEQ);
   }
 
   // House rule: a steel plate is exactly two triples (six cards).
-  for (let run = 2; run <= 2; run += 1) {
-    for (let start = 3; start <= 15 - run; start += 1) {
-      const used = new Set();
-      const cards = [];
-      let ok = true;
-      for (let rank = start; rank < start + run; rank += 1) {
-        const piece = takeCards(byRank, wilds, rank, 3, used);
-        if (!piece) {
-          ok = false;
-          break;
-        }
-        piece.forEach((card) => used.add(card.id));
-        cards.push(...piece);
+  for (let start = 1; start + 1 <= SEQ_TOP; start += 1) {
+    const used = new Set();
+    const cards = [];
+    let ok = true;
+    for (let position = start; position < start + 2; position += 1) {
+      const piece = takeCards(byRank, wilds, rankAtPosition(position), 3, used);
+      if (!piece) {
+        ok = false;
+        break;
       }
-      if (ok) consider(cards, TYPES.TRIPLE_SEQ);
+      piece.forEach((card) => used.add(card.id));
+      cards.push(...piece);
     }
+    if (ok) consider(cards, TYPES.TRIPLE_SEQ);
   }
 
   return out.sort((a, b) => {

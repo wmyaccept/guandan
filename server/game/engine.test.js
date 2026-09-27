@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { autoAct, buildTribute, createMatch, playCards, publicState, returnTribute, startRound } from "./engine.js";
+import { autoAct, buildTribute, createMatch, passTurn, playCards, publicState, returnTribute, startRound } from "./engine.js";
 import { createShoe } from "./cards.js";
+import { TYPES } from "./combos.js";
 
 test("two decks deal 27 cards each", () => {
   assert.equal(createShoe().length, 108);
@@ -96,7 +97,7 @@ test("头三：只由末游向头游进一贡", () => {
   assert.equal(match.tributePlan[0].to, 0);
 });
 
-test("头末：末游与头游同队，由三游进贡", () => {
+test("头末内供：末游是头游队友时也要进贡", () => {
   const match = matchWithFinish([0, 1, 3, 2]);
   match.hands = [
     [tc("S", 5)],
@@ -106,8 +107,27 @@ test("头末：末游与头游同队，由三游进贡", () => {
   ];
   assert.equal(buildTribute(match), true);
   assert.equal(match.tributePlan.length, 1);
-  assert.equal(match.tributePlan[0].from, 3);
+  assert.equal(match.tributePlan[0].from, 2);
   assert.equal(match.tributePlan[0].to, 0);
+  assert.equal(match.tributePlan[0].cardId, match.hands[2][0].id);
+  assert.equal(match.nextLead, 2);
+});
+
+test("双下：头游拿大贡，进大贡的一家先出", () => {
+  const match = matchWithFinish([0, 2, 1, 3]);
+  match.hands = [
+    [tc("S", 5)],
+    [tc("S", 4)],
+    [tc("S", 6)],
+    [tc("S", 13)]
+  ];
+  assert.equal(buildTribute(match), true);
+  assert.deepEqual(
+    match.tributePlan.map((step) => [step.from, step.to]),
+    [[3, 0], [1, 2]]
+  );
+  assert.equal(match.tributePlan[0].cardId, match.hands[3][0].id);
+  assert.equal(match.nextLead, 3);
 });
 
 test("抗贡：单进贡方独握两张大王", () => {
@@ -164,7 +184,7 @@ test("逢人配不作为贡牌", () => {
   assert.equal(match.tributePlan.some((step) => step.cardId === wild.id), false);
 });
 
-test("还贡完成后由头游先出", () => {
+test("还贡完成后由进贡方先出", () => {
   const match = matchWithFinish([2, 1, 0, 3]);
   match.hands = [
     [tc("S", 5), tc("S", 4)],
@@ -190,15 +210,75 @@ test("还贡完成后由头游先出", () => {
   const done = returnTribute(match, step.to, small.id);
   assert.equal(done.ok, true);
   assert.equal(match.phase, "play");
-  assert.equal(match.leadSeat, 2);
-  assert.equal(match.turn, 2);
+  assert.equal(match.leadSeat, 3);
+  assert.equal(match.turn, 3);
   assert.equal(match.hands[2].length, 1);
   assert.equal(match.hands[3].length, 1);
   assert.equal(match.hands[3][0].rank, 7);
   assert.match(match.tributeSummary.at(-1), /还贡/);
 });
 
-test("整局模拟：进贡方必为负方，双下两贡", () => {
+test("抗贡之后由头游先出", () => {
+  const match = matchWithFinish([0, 1, 2, 3]);
+  match.hands = [
+    [tc("S", 5)],
+    [tc("S", 6)],
+    [tc("S", 7)],
+    [tc("J", 17), tc("J", 17), tc("S", 4)]
+  ];
+  match.nextLead = 1;
+  assert.equal(buildTribute(match), false);
+  assert.equal(match.nextLead, 0);
+});
+
+test("双下提前结束：同队包揽头二游就不再往下打", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [
+    [tc("S", 7)],
+    [tc("S", 3)],
+    [tc("J", 17)],
+    [tc("S", 4), tc("S", 5), tc("S", 6)]
+  ];
+  match.turn = 0;
+  assert.equal(playCards(match, 0, [match.hands[0][0].id]).ok, true);
+  assert.equal(match.phase, "play");
+  assert.equal(passTurn(match, 1).ok, true);
+  assert.equal(playCards(match, 2, [match.hands[2][0].id]).ok, true);
+  assert.equal(match.phase, "roundOver");
+  assert.deepEqual(match.finishOrder, [0, 2, 1, 3]);
+  assert.equal(match.roundResult.kind, "双下");
+  assert.equal(match.roundResult.steps, 3);
+  assert.equal(match.hands[1].length, 1);
+  assert.equal(match.hands[3].length, 3);
+});
+
+test("记牌器只统计还没露面的牌", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.phase = "play";
+  match.playedCards = [tc("S", 3), tc("H", 3), tc("J", 17)];
+  match.hands = [[tc("S", 3), tc("D", 9)], [], [], []];
+  const view = publicState(match, 0);
+  assert.equal(view.remaining[3], 5);
+  assert.equal(view.remaining[17], 1);
+  assert.equal(view.remaining[9], 7);
+  assert.equal(view.remaining[5], 8);
+});
+
+test("自己出完可以看队友的手牌", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.phase = "play";
+  match.hands = [[], [tc("S", 3)], [tc("S", 4), tc("H", 9)], []];
+  const mine = publicState(match, 0);
+  assert.equal(mine.spectate.seat, 2);
+  assert.deepEqual(mine.spectate.hand.map((card) => card.rank), [4, 9]);
+  assert.equal(publicState(match, 1).spectate, null);
+  match.phase = "roundOver";
+  assert.equal(publicState(match, 0).spectate, null);
+});
+
+test("整局模拟：进贡按名次，双下两贡", () => {
   let tributeRounds = 0;
   let refusedRounds = 0;
   for (let g = 0; g < 5; g += 1) {
@@ -211,7 +291,7 @@ test("整局模拟：进贡方必为负方，双下两贡", () => {
         const finish = match.roundResult.finishOrder;
         const kind = match.roundResult.kind;
         const head = finish[0];
-        const losers = finish.filter((seat) => seat % 2 !== head % 2);
+        const payers = kind === "双下" ? [finish[3], finish[2]] : [finish[3]];
         startRound(match);
         if (match.phase === "returnTribute") {
           tributeRounds += 1;
@@ -219,10 +299,10 @@ test("整局模拟：进贡方必为负方，双下两贡", () => {
           assert.equal(match.tributePlan[0].to, head);
           assert.equal(match.tributeSummary.length, match.tributePlan.length);
           for (const plan of match.tributePlan) {
-            assert.ok(losers.includes(plan.from), "进贡方应为负方");
-            assert.ok(!losers.includes(plan.to), "收贡方应为胜方");
+            assert.ok(payers.includes(plan.from), "进贡方按名次定");
+            assert.ok(plan.to === head || plan.to === finish[1], "收贡方是头游或二游");
           }
-          assert.equal(match.nextLead, head);
+          assert.equal(match.nextLead, match.tributePlan[0].from);
           assert.equal(match.hands.reduce((sum, hand) => sum + hand.length, 0), 108);
           let inner = 0;
           while (match.phase === "returnTribute") {
@@ -231,7 +311,7 @@ test("整局模拟：进贡方必为负方，双下两贡", () => {
             assert.equal(autoAct(match, match.returnsPlan[0].from).ok, true);
           }
           assert.equal(match.phase, "play");
-          assert.equal(match.leadSeat, head);
+          assert.equal(match.leadSeat, match.nextLead);
           assert.deepEqual(match.hands.map((hand) => hand.length), [27, 27, 27, 27]);
         } else {
           assert.equal(match.phase, "play");
@@ -247,4 +327,29 @@ test("整局模拟：进贡方必为负方，双下两贡", () => {
   }
   assert.ok(tributeRounds > 0, "应至少出现一次进贡");
   console.log("      tribute rounds:", tributeRounds, "refused:", refusedRounds);
+});
+
+test("同花顺 A2345 能压住更大的普通顺子", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [
+    [tc("S", 14), tc("S", 15), tc("S", 3), tc("S", 4), tc("S", 5)],
+    [tc("H", 4), tc("D", 5), tc("C", 6), tc("S", 7), tc("H", 8)],
+    [tc("H", 9)],
+    [tc("H", 10)]
+  ];
+  match.turn = 1;
+  const lead = playCards(match, 1, match.hands[1].map((card) => card.id));
+  assert.equal(lead.ok, true, lead.error ?? "");
+  assert.equal(match.current.type, TYPES.STRAIGHT);
+  assert.equal(match.current.rank, 8);
+
+  // 甲手里是黑桃 A2345：当顺子看比上家小，当同花顺看是炸弹，
+  // 引擎不能因为上家是顺子就把它锁死在输的那种解读上。
+  match.turn = 0;
+  const beat = playCards(match, 0, match.hands[0].map((card) => card.id));
+  assert.equal(beat.ok, true, beat.error ?? "");
+  assert.equal(match.current.type, TYPES.FLUSH_STRAIGHT);
+  assert.equal(match.hands[0].length, 0);
 });

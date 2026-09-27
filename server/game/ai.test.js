@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { makeCard } from "./cards.js";
-import { parseCombo } from "./combos.js";
+import { parseCombo, TYPES } from "./combos.js";
 import { chooseAction, decompose, isTopOfKind, suggestPlays, unseenCounts } from "./ai.js";
 import { autoAct, createMatch, startRound } from "./engine.js";
 
@@ -310,4 +310,27 @@ test("同一桌混着打，强力队拿头游的次数多于简单队", () => {
     else easyHead += 1;
   }
   assert.ok(hardHead > easyHead, "强力队头游 " + hardHead + " 次，简单队 " + easyHead + " 次");
+});
+
+test("拆牌认得 A 当小和 2 打头的连牌", () => {
+  // 打A：223344 是木板，不该散成三个对子
+  const plate = decompose(makeHand("S15", "H15", "S3", "H3", "S4", "H4"), 14);
+  assert.ok(plate.groups.some((group) => group.type === TYPES.PAIR_SEQ));
+  assert.equal(plate.tricks, 1);
+
+  // 打 2：A2345 是最小的顺子
+  const aceLow = decompose(makeHand("S14", "S15", "D3", "C4", "H5"), 15);
+  assert.ok(aceLow.groups.some((group) => group.type === TYPES.STRAIGHT));
+  assert.equal(aceLow.tricks, 1);
+
+  // 同花的 A2345 要算同花顺，不能当普通顺子白送
+  const flush = decompose(makeHand("S14", "S15", "S3", "S4", "S5"), 15);
+  assert.ok(flush.groups.some((group) => group.type === TYPES.FLUSH_STRAIGHT));
+
+  // A 既能当大又能当小，但一张牌不能用两次
+  const both = makeHand("S14", "S15", "D3", "C4", "H5", "D10", "C11", "S12", "H13");
+  const plan = decompose(both, 15);
+  const ids = plan.groups.flatMap((group) => group.cards.map((card) => card.id));
+  assert.equal(ids.length, both.length);
+  assert.equal(new Set(ids).size, both.length);
 });

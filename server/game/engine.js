@@ -9,7 +9,7 @@ import {
   shuffle,
   sortHand
 } from "./cards.js";
-import { canBeat, comboLabel, parseCombo } from "./combos.js";
+import { bombPower, canBeat, comboLabel, parseCombo, parseCombos } from "./combos.js";
 import { generatePlays } from "./moves.js";
 import { chooseAction, chooseReturnCard, normalizeDifficulty } from "./ai.js";
 
@@ -148,10 +148,9 @@ export function buildTribute(match) {
   match.tributeRefused = [];
 
   const head = finish[0];
-  const winTeam = teamOf(head);
-  // 负方按名次排列：双下时两人都进贡，其余只由负方最后一名进贡
-  const losers = finish.filter((seat) => teamOf(seat) !== winTeam);
-  const payers = kind === "双下" ? losers : [losers.at(-1)];
+  // 名次决定进贡方：双下由末游和三游各进一贡，其余只有末游进贡。末游若正好
+  // 是头游的队友，就是“内供”，照样要进。
+  const payers = kind === "双下" ? [finish[3], finish[2]] : [finish[3]];
   const receivers = kind === "双下" ? [head, finish[1]] : [head];
 
   // 抗贡：进贡方合计握有两张大王（双下时允许一人一张）
@@ -161,6 +160,8 @@ export function buildTribute(match) {
     const refusedNames = payers.map((seat) => match.names[seat]).join("、");
     addLog(match, `${refusedNames} 双大王抗贡`);
     match.tributeSummary = [`${refusedNames} 手握双大王，抗贡成功，本局不进贡`];
+    // 抗贡没人进贡，按规则回到头游先出
+    match.nextLead = head;
     return false;
   }
 
@@ -176,6 +177,8 @@ export function buildTribute(match) {
   if (gifts.length > 1 && receivers.length > 1) {
     match.tributePlan.push({ from: gifts[0].from, to: receivers[1], cardId: gifts[0].card.id });
   }
+  // 还贡之后由进贡方先出：单下是末游，双下是进贡大牌的那一家
+  match.nextLead = big.from;
   return true;
 }
 
@@ -257,7 +260,7 @@ export function returnTribute(match, seat, cardId) {
   match.tributeSummary.push(text);
   match.returnsPlan = match.returnsPlan.filter((item) => item.from !== seat);
   if (!match.returnsPlan.length) {
-    beginPlay(match, match.nextLead, `${match.names[match.nextLead]} 还贡完毕，先出`);
+    beginPlay(match, match.nextLead, `${match.names[match.nextLead]} 进贡方先出`);
   } else {
     match.turn = match.returnsPlan[0].from;
   }
@@ -277,6 +280,18 @@ function finishSeat(match, seat) {
   match.finishOrder.push(seat);
   const titles = ["头游", "二游", "三游", "末游"];
   addLog(match, `${match.names[seat]} ${titles[match.finishOrder.length - 1]}`);
+  // 双下不必打完：同队包揽头游二游时名次已定，剩下两家按手牌多少排三游末游
+  if (match.finishOrder.length === 2 && teamOf(match.finishOrder[0]) === teamOf(match.finishOrder[1])) {
+    const rest = [0, 1, 2, 3]
+      .filter((item) => !match.finishOrder.includes(item))
+      .sort((a, b) => match.hands[a].length - match.hands[b].length || a - b);
+    match.finishOrder.push(...rest);
+    addLog(match, `${match.names[rest[0]]} 三游`);
+    addLog(match, `${match.names[rest[1]]} 末游`);
+    addLog(match, "双下，本局提前结束");
+    endRound(match);
+    return;
+  }
   if (match.finishOrder.length === 3) {
     const last = [0, 1, 2, 3].find((item) => !match.finishOrder.includes(item));
     match.finishOrder.push(last);
@@ -332,8 +347,24 @@ export function playCards(match, seat, cardIds, reason = "") {
   if (new Set(cardIds).size !== cardIds.length) return { ok: false, error: "\u91cd\u590d\u7684\u724c" };
   const cards = cardIds.map((id) => hand.find((card) => card.id === id)).filter(Boolean);
   if (cards.length !== cardIds.length) return { ok: false, error: "手里没有这些牌" };
+  const levelRank = levelRankOf(match);
   const preferred = match.current && !match.current.bombPower ? match.current.type : null;
-  const combo = parseCombo(cards, levelRankOf(match), preferred);
+  let combo = parseCombo(cards, levelRank, preferred);
+  if (match.current && (!combo || !canBeat(combo, match.current))) {
+    // One card set can read several ways: spaded A2345 is a plain straight and
+    // a flush-straight bomb at the same time. Honour the type hint only while
+    // it still wins, else fall back to the weakest reading that beats.
+    combo =
+      parseCombos(cards, levelRank)
+        .filter((item) => canBeat(item, match.current))
+        .sort(
+          (a, b) =>
+            bombPower(a) - bombPower(b) ||
+            a.rank - b.rank ||
+            a.length - b.length ||
+            a.type.localeCompare(b.type)
+        )[0] ?? combo;
+  }
   if (!combo) return { ok: false, error: "这不是合法牌型" };
   if (match.current && !canBeat(combo, match.current)) return { ok: false, error: "压不住上家" };
   if (!match.current && combo.cards.length === 0) return { ok: false, error: "必须出牌" };
@@ -385,6 +416,27 @@ export function passTurn(match, seat, reason = "") {
   return { ok: true };
 }
 
+// 自己已经出完而队友还有牌时，允许看队友的手牌
+function spectatorView(match, viewerSeat) {
+  if (viewerSeat == null || match.phase !== "play") return null;
+  if (match.hands[viewerSeat].length) return null;
+  const partner = partnerOf(viewerSeat);
+  if (!match.hands[partner].length) return null;
+  return { seat: partner, name: match.names[partner], hand: match.hands[partner] };
+}
+
+// 记牌器：每种点数还剩多少张没露面（已出的和自己手里的都扣掉）
+export function remainingCounts(match, viewerSeat = null) {
+  const counts = {};
+  for (let rank = 3; rank <= 17; rank += 1) counts[rank] = rank >= 16 ? 2 : 8;
+  for (const card of match.playedCards ?? []) counts[card.rank] -= 1;
+  if (viewerSeat != null) {
+    for (const card of match.hands[viewerSeat] ?? []) counts[card.rank] -= 1;
+  }
+  for (let rank = 3; rank <= 17; rank += 1) counts[rank] = Math.max(0, counts[rank]);
+  return counts;
+}
+
 export function publicState(match, viewerSeat = null) {
   const levelRank = levelRankOf(match);
   return {
@@ -409,6 +461,8 @@ export function publicState(match, viewerSeat = null) {
     tributePlan: match.tributePlan,
     tributeRefused: match.tributeRefused ?? [],
     tributeSummary: match.tributeSummary ?? [],
+    spectate: spectatorView(match, viewerSeat),
+    remaining: remainingCounts(match, viewerSeat),
     roundResult: match.roundResult,
     winnerTeam: match.winnerTeam,
     log: match.log.slice(-12),
