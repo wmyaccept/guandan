@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { autoAct, buildTribute, createMatch, passTurn, playCards, publicState, returnTribute, startRound } from "./engine.js";
 import { createShoe } from "./cards.js";
-import { TYPES } from "./combos.js";
+import { TYPES, comboKey, parseCombo, parseCombos } from "./combos.js";
 
 test("two decks deal 27 cards each", () => {
   assert.equal(createShoe().length, 108);
@@ -352,4 +352,45 @@ test("同花顺 A2345 能压住更大的普通顺子", () => {
   assert.equal(beat.ok, true, beat.error ?? "");
   assert.equal(match.current.type, TYPES.FLUSH_STRAIGHT);
   assert.equal(match.hands[0].length, 0);
+});
+function wildHandMatch() {
+  const match = createMatch(["A", "B", "C", "D"]);
+  match.teamLevel = [5, 5];
+  match.round = 2;
+  match.phase = "play";
+  match.turn = 0;
+  match.hands = [
+    [tc("S", 7), tc("H", 7), tc("S", 14), tc("H", 14), tc("H", 5)],
+    [tc("S", 3)],
+    [tc("S", 3)],
+    [tc("S", 3)]
+  ];
+  return match;
+}
+
+test("leading with a wild card asks the player which reading to play", () => {
+  const match = wildHandMatch();
+  match.leadSeat = 0;
+  const ids = match.hands[0].map((card) => card.id);
+  const first = playCards(match, 0, ids);
+  assert.equal(first.ok, false);
+  assert.equal(first.ambiguous, true);
+  assert.ok(first.options.length >= 2);
+  const aces = parseCombos(match.hands[0], 5)
+    .find((item) => item.type === TYPES.FULL_HOUSE && item.rank === 14);
+  const option = first.options.find((item) => item.key === comboKey(aces));
+  assert.ok(option, "ace reading missing from the choices");
+  const second = playCards(match, 0, ids, "", option.key);
+  assert.equal(second.ok, true);
+  assert.equal(match.current.type, TYPES.FULL_HOUSE);
+  assert.equal(match.current.rank, 14);
+});
+
+test("a wild card fills the only winning reading without asking", () => {
+  const match = wildHandMatch();
+  match.leadSeat = 1;
+  match.current = parseCombo([tc("S", 8), tc("H", 8), tc("D", 8), tc("S", 9), tc("H", 9)], 5);
+  const result = playCards(match, 0, match.hands[0].map((card) => card.id));
+  assert.equal(result.ok, true);
+  assert.equal(match.current.rank, 14);
 });

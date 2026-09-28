@@ -194,3 +194,55 @@ test("rank order holds for every level", () => {
     }
   }
 });
+test("hand sort after a level change keeps Q K A on the right", () => {
+  const hand = [
+    makeCard(0, "S", 14),
+    makeCard(1, "S", 12),
+    makeCard(2, "S", 13),
+    makeCard(3, "S", 11),
+    makeCard(4, "S", 10),
+    makeCard(5, "S", 5),
+    makeCard(6, "S", 15),
+    makeCard(7, "J", 16),
+    makeCard(8, "J", 17)
+  ];
+  assert.deepEqual(sortHand(hand, 5).map((card) => card.rank), [15, 10, 11, 12, 13, 14, 5, 16, 17]);
+});
+
+test("wild heart turns 77AA into two possible full houses", () => {
+  const houses = parseCombos(cards("S7", "H7", "SA", "HA", "H5"), 5)
+    .filter((item) => item.type === TYPES.FULL_HOUSE)
+    .map((item) => [item.rank, item.pairRank])
+    .sort((a, b) => a[0] - b[0]);
+  assert.deepEqual(houses, [[7, 14], [14, 7]]);
+});
+
+test("ace reading of 77AA beats 88899 while the seven reading does not", () => {
+  const target = parseCombo(cards("S8", "H8", "D8", "S9", "H9"), 5);
+  const found = parseCombos(cards("S7", "H7", "SA", "HA", "H5"), 5);
+  const aces = found.find((item) => item.type === TYPES.FULL_HOUSE && item.rank === 14);
+  const sevens = found.find((item) => item.type === TYPES.FULL_HOUSE && item.rank === 7);
+  assert.ok(aces && sevens);
+  assert.equal(canBeat(aces, target), true);
+  assert.equal(canBeat(sevens, target), false);
+});
+
+test("a lone wild heart card only reads as its own single", () => {
+  const found = parseCombos(cards("H5"), 5);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].type, TYPES.SINGLE);
+  assert.equal(found[0].rank, 5);
+});
+
+test("same suit run keeps both straight and flush straight readings", () => {
+  const found = parseCombos(cards("S5", "S6", "S7", "S8", "S9"), 5);
+  assert.ok(found.some((item) => item.type === TYPES.STRAIGHT));
+  assert.ok(found.some((item) => item.type === TYPES.FLUSH_STRAIGHT));
+});
+
+test("wild card at a run end keeps both start positions", () => {
+  const starts = [...new Set(parseCombos(cards("S5", "S6", "S7", "S8", "H5"), 5)
+    .filter((item) => item.type === TYPES.STRAIGHT)
+    .map((item) => item.start))].sort((a, b) => a - b);
+  assert.deepEqual(starts, [4, 5]);
+});

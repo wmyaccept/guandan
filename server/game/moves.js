@@ -1,5 +1,5 @@
 import { SEQ_TOP, isHeartLevel, isJoker, rankAtPosition } from "./cards.js";
-import { TYPES, parseCombo, canBeat, bombPower } from "./combos.js";
+import { TYPES, canBeat, bombPower, comboKey, parseCombos } from "./combos.js";
 
 function byRankMap(hand) {
   const map = Object.create(null);
@@ -36,13 +36,20 @@ function withUsed(used, cards) {
   return next;
 }
 
+// One set of cards can legally read more than one way: a wild card stands in for
+// either the triple or the pair of a full house, and a same-suit run is also a
+// plain straight. Emit every usable reading so the caller can pick.
 function pushCombo(out, seen, cards, levelRank, current, preferred) {
-  const combo = parseCombo(cards, levelRank, preferred);
-  if (!combo || !canBeat(combo, current)) return;
-  const key = `${combo.type}:${combo.cards.map((card) => card.id).sort().join(",")}`;
-  if (seen.has(key)) return;
-  seen.add(key);
-  out.push(combo);
+  const usable = parseCombos(cards, levelRank).filter((item) => canBeat(item, current));
+  if (!usable.length) return;
+  const ids = cards.map((card) => card.id).sort().join(",");
+  if (preferred) usable.sort((a, b) => Number(b.type === preferred) - Number(a.type === preferred));
+  for (const combo of usable) {
+    const key = `${comboKey(combo)}|${ids}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(combo);
+  }
 }
 
 function findSuitRank(hand, suit, rank, used) {

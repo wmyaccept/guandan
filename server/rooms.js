@@ -302,11 +302,15 @@ export function attachSockets(io) {
       scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
-    socket.on("play", ({ cardIds }) => {
+    socket.on("play", ({ cardIds, comboKey } = {}) => {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room?.match) return;
       const seat = room.seats.findIndex((item) => item?.socketId === socket.id);
-      const result = playCards(room.match, seat, cardIds ?? []);
+      const selected = Array.isArray(cardIds) ? cardIds : [];
+      const result = playCards(room.match, seat, selected, "", comboKey ?? null);
+      if (result.ambiguous) {
+        return socket.emit("comboChoice", { cardIds: selected, options: result.options });
+      }
       if (!result.ok) return socket.emit("errorMessage", result.error);
       scheduleAfterAction(io, room, BOT_DELAY_MS);
     });

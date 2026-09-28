@@ -4,6 +4,7 @@ const selected = new Set();
 let state = null;
 let you = -1;
 let handPiles = [];
+let handPilesCustom = false;
 let handOwner = null;
 const pilesByOwner = new Map();
 let spectateOn = false;
@@ -271,25 +272,98 @@ function sweepDown(ctx, at, from, to, dur, peak) {
 
 const RUN_STEPS = [0, 3, 7, 10, 14, 17, 20, 24];
 
+function noiseWhoosh(ctx, at, dur, peak, from, to, q) {
+  const src = ctx.createBufferSource();
+  src.buffer = makeNoise(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.Q.value = q || 1.6;
+  filter.frequency.setValueAtTime(from, at);
+  filter.frequency.exponentialRampToValueAtTime(to, at + dur);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + dur * 0.32);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  src.start(at);
+  src.stop(at + dur + 0.05);
+}
+
+function woodKnock(ctx, at, freq, dur, peak) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(freq, at);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(60, freq * 0.5), at + dur);
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + dur + 0.05);
+}
+
+function metalClang(ctx, at, base, dur, peak) {
+  [1, 2.76, 5.4, 8.93].forEach((ratio, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = i === 0 ? "triangle" : "square";
+    osc.frequency.setValueAtTime(base * ratio, at);
+    const level = peak / (1 + i * 1.6);
+    const life = dur * (1 - i * 0.14);
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(level, at + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + life);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(at);
+    osc.stop(at + life + 0.06);
+  });
+}
+
+// every shape gets its own voice: running water for straights, wood for the board,
+// steel for the plate, sparkle for the flush straight, rumble for bombs.
 function playComboSound(combo) {
   if (!soundOn || !combo) return;
   const ctx = ensureAudio();
   if (!ctx) return;
   const at = ctx.currentTime + 0.01;
   const size = combo.cards?.length ?? 1;
-  noiseHit(ctx, at, 0.12, size >= 5 ? 0.3 : 0.2, 1800, "bandpass");
   const type = combo.type;
-  if (type === "straight" || type === "pairseq" || type === "tripleseq") {
-    const copies = type === "tripleseq" ? 3 : type === "pairseq" ? 2 : 1;
-    const steps = Math.min(RUN_STEPS.length, Math.max(3, Math.round(size / copies)));
-    for (let i = 0; i < steps; i += 1) {
-      toneHit(ctx, at + 0.05 + i * 0.07, 392 * Math.pow(2, RUN_STEPS[i] / 12), 0.2, 0.13, "triangle");
-    }
-  } else if (type === "flushstraight") {
-    [0, 5, 9, 12, 17].forEach((semi, i) => {
-      toneHit(ctx, at + 0.05 + i * 0.055, 523.25 * Math.pow(2, semi / 12), 0.36, 0.11, "sine");
+
+  if (type === "straight") {
+    noiseWhoosh(ctx, at, 0.5, 0.26, 620, 2800, 2.4);
+    RUN_STEPS.slice(0, 4).forEach((semi, i) => {
+      toneHit(ctx, at + 0.05 + i * 0.06, 523.25 * Math.pow(2, semi / 12), 0.22, 0.05, "sine");
     });
-  } else if (type === "fullhouse") {
+    return;
+  }
+  if (type === "pairseq") {
+    const pairs = Math.max(2, Math.min(3, Math.round(size / 2)));
+    for (let i = 0; i < pairs; i += 1) {
+      woodKnock(ctx, at + i * 0.11, 210 - i * 14, 0.17, 0.36);
+      noiseHit(ctx, at + i * 0.11, 0.06, 0.12, 780, "lowpass");
+    }
+    return;
+  }
+  if (type === "tripleseq") {
+    for (let i = 0; i < 2; i += 1) metalClang(ctx, at + i * 0.17, 640 + i * 70, 0.5, 0.15);
+    noiseHit(ctx, at, 0.09, 0.1, 3600, "highpass");
+    return;
+  }
+  if (type === "flushstraight") {
+    [0, 4, 7, 12, 16, 19].forEach((semi, i) => {
+      toneHit(ctx, at + 0.04 + i * 0.05, 523.25 * Math.pow(2, semi / 12), 0.42, 0.1, "sine");
+    });
+    noiseWhoosh(ctx, at, 0.42, 0.11, 1600, 5200, 1.1);
+    return;
+  }
+
+  noiseHit(ctx, at, 0.12, size >= 5 ? 0.3 : 0.2, 1800, "bandpass");
+  if (type === "fullhouse") {
     toneHit(ctx, at + 0.06, 349.23, 0.2, 0.15, "triangle");
     toneHit(ctx, at + 0.2, 523.25, 0.28, 0.15, "triangle");
   } else if (type === "bomb") {
@@ -363,6 +437,10 @@ function groupByRank(cards) {
 
 function syncPiles(cards) {
   const byId = new Map(cards.map((card) => [card.id, card]));
+  if (!handPilesCustom) {
+    handPiles = groupByRank(cards);
+    return;
+  }
   const keptAny = handPiles.some((pile) => pile.some((id) => byId.has(id)));
   if (!keptAny) {
     handPiles = groupByRank(cards);
@@ -405,6 +483,7 @@ function groupSelected() {
   const next = handPiles.map((pile) => pile.filter((id) => !selected.has(id))).filter((pile) => pile.length);
   next.splice(Math.max(0, Math.min(firstIndex, next.length)), 0, ids);
   handPiles = next;
+  handPilesCustom = true;
   if (state) renderHand(state.match);
 }
 
@@ -486,6 +565,41 @@ function toggleSelect(id, node) {
   node.classList.toggle("up", selected.has(id));
 }
 
+let pendingComboChoice = null;
+
+function closeComboChoice() {
+  pendingComboChoice = null;
+  $("comboChoice")?.classList.add("hidden");
+}
+
+function openComboChoice({ cardIds, options } = {}) {
+  if (!Array.isArray(options) || !options.length) return;
+  selected.clear();
+  for (const id of cardIds ?? []) selected.add(id);
+  pendingComboChoice = { cardIds: (cardIds ?? []).slice(), options };
+  if (state) renderHand(state.match);
+  const holder = $("comboOptions");
+  holder.textContent = "";
+  for (const option of options) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "combo-option";
+    const title = document.createElement("strong");
+    title.textContent = option.label;
+    const detail = document.createElement("span");
+    detail.textContent = option.detail;
+    button.append(title, detail);
+    button.addEventListener("click", () => {
+      const payload = pendingComboChoice;
+      if (!payload) return;
+      closeComboChoice();
+      socket.emit("play", { cardIds: payload.cardIds, comboKey: option.key });
+    });
+    holder.append(button);
+  }
+  $("comboChoice").classList.remove("hidden");
+}
+
 /* ---------------- partner view: watch your teammate once you are out ---------------- */
 function spectateInfo(match) {
   const info = match?.spectate;
@@ -502,7 +616,8 @@ function effectiveHand(match) {
 
 function ownerKey(match) {
   const info = spectateOn ? spectateInfo(match) : null;
-  return info ? "partner-" + info.seat : "self";
+  const owner = info ? "partner-" + info.seat : "self";
+  return owner + "@" + (match?.round ?? 0);
 }
 
 function updateSpectate(match) {
@@ -584,15 +699,24 @@ function renderHand(match) {
   hand.innerHTML = "";
   if (!match) {
     handPiles = [];
+    handPilesCustom = false;
     handOwner = null;
     return;
   }
-  // each view keeps its own pile layout, so switching back restores your grouping
+  // Each view and round has its own layout. A new deal starts from the
+  // server-sorted hand; manual grouping is preserved until the round changes.
   const key = ownerKey(match);
   if (handOwner !== key) {
-    if (handOwner) pilesByOwner.set(handOwner, handPiles.map((pile) => pile.slice()));
+    if (handOwner) {
+      pilesByOwner.set(handOwner, {
+        piles: handPiles.map((pile) => pile.slice()),
+        custom: handPilesCustom
+      });
+    }
+    const saved = pilesByOwner.get(key);
     handOwner = key;
-    handPiles = (pilesByOwner.get(key) ?? []).map((pile) => pile.slice());
+    handPiles = (saved?.piles ?? []).map((pile) => pile.slice());
+    handPilesCustom = saved?.custom ?? false;
   }
   const cards = effectiveHand(match);
   syncPiles(cards);
@@ -633,6 +757,7 @@ function applyDrop(id, dest) {
     next.splice(Math.max(0, Math.min(index, next.length)), 0, [id]);
   }
   handPiles = next.filter((pile) => pile.length);
+  handPilesCustom = true;
 }
 
 function locateDrop(x, y, draggedId) {
@@ -1154,7 +1279,9 @@ function resetToLobby(message) {
   you = -1;
   myTurnSeen = false;
   selected.clear();
+  closeComboChoice();
   handPiles = [];
+  handPilesCustom = false;
   handOwner = null;
   pilesByOwner.clear();
   spectateOn = false;
@@ -1329,6 +1456,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   closeSettings();
   closeGesturePop();
+  closeComboChoice();
 });
 document.addEventListener("click", (event) => {
   if (event.target.closest("#settingsPanel, #settingsBtn, #lobbySettingsBtn")) return;
@@ -1381,3 +1509,4 @@ document.addEventListener("click", (event) => {
 window.addEventListener("resize", closeGesturePop);
 window.addEventListener("scroll", closeGesturePop, true);
 socket.on("gesture", ({ from, to, kind, by } = {}) => playGesture(from, to, kind, by));
+socket.on("comboChoice", openComboChoice);

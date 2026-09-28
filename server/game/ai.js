@@ -1,5 +1,5 @@
 import { isHeartLevel, pointValue, rankAtPosition, rankValue } from "./cards.js";
-import { TYPES, bombPower, comboLabel, parseCombos } from "./combos.js";
+import { TYPES, bombPower, comboKey, comboLabel, parseCombos } from "./combos.js";
 import { generatePlays } from "./moves.js";
 
 export const DIFFICULTIES = ["easy", "medium", "hard"];
@@ -431,6 +431,12 @@ function cardIds(combo) {
   return combo.cards.map((card) => card.id);
 }
 
+// The engine replays the exact reading the planner scored instead of guessing one
+// of its own, so the shape on the table always matches the shape the AI valued.
+function playDecision(combo, reason, order) {
+  return { action: "play", cardIds: cardIds(combo), comboKey: comboKey(combo), reason, order };
+}
+
 function lead(ctx, order) {
   if (!order.length) return { action: "play", cardIds: [ctx.hand[0].id], reason: "无牌可组", order };
   const { partnerCount, levelRank, profile } = ctx;
@@ -439,10 +445,10 @@ function lead(ctx, order) {
     const fit = order
       .filter(({ item }) => !item.bp && item.c.length === partnerCount)
       .sort((a, b) => rankValue(a.item.c.rank, levelRank) - rankValue(b.item.c.rank, levelRank));
-    if (fit.length) return { action: "play", cardIds: cardIds(fit[0].item.c), reason: "送对家走", order };
+    if (fit.length) return playDecision(fit[0].item.c, "送对家走", order);
   }
   const pick = order[0].item.c;
-  return { action: "play", cardIds: cardIds(pick), reason: "领出" + comboLabel(pick), order };
+  return playDecision(pick, "领出" + comboLabel(pick), order);
 }
 
 function follow(ctx, order) {
@@ -468,17 +474,17 @@ function follow(ctx, order) {
     const spendsControl = controlCost(best.c.cards, levelRank) >= 2;
     const cheapWin = !breaksBomb && !breaksShape;
     if (cheapWin && !(spendsControl && trickSmall && !stopNeeded && !lastToAct)) {
-      return { action: "play", cardIds: cardIds(best.c), reason: stopNeeded ? "拦住对手" : "压上家", order };
+      return playDecision(best.c, stopNeeded ? "拦住对手" : "压上家", order);
     }
     if (!lastToAct && !stopNeeded) return { action: "pass", reason: "先看队友", order };
     if (breaksBomb && !stopNeeded) return { action: "pass", reason: "不拆炸弹", order };
-    if (!breaksShape || stopNeeded) return { action: "play", cardIds: cardIds(best.c), reason: "最后一家必须压", order };
+    if (!breaksShape || stopNeeded) return playDecision(best.c, "最后一家必须压", order);
     return { action: "pass", reason: "不拆牌", order };
   }
 
   if (bombs.length) {
     const allowed = stopNeeded || bombPower(current) > 0 || trickFat || myCount <= 8;
-    if (allowed) return { action: "play", cardIds: cardIds(bombs[0].item.c), reason: "炸弹拦下", order };
+    if (allowed) return playDecision(bombs[0].item.c, "炸弹拦下", order);
     return { action: "pass", reason: "留着炸弹", order };
   }
   return { action: "pass", reason: "压不住", order };
@@ -505,23 +511,23 @@ function easyDecide(ctx, rng) {
     );
 
   const goingOut = cheap.find((combo) => combo.length === myCount);
-  if (goingOut) return { action: "play", cardIds: cardIds(goingOut), reason: "一把走完", order: [] };
+  if (goingOut) return playDecision(goingOut, "一把走完", []);
 
   if (!current) {
     // Jitter among the three cheapest plain cards so it is not a fixed script.
     const plain = cheap.filter((combo) => !pow(combo) && combo.length <= 2);
     const pool = (plain.length ? plain : cheap).slice(0, 3);
     const pick = pool[Math.floor(rng() * pool.length) % pool.length];
-    return { action: "play", cardIds: cardIds(pick), reason: "领出" + comboLabel(pick), order: [] };
+    return playDecision(pick, "领出" + comboLabel(pick), []);
   }
 
   const winners = cheap.filter((combo) => !pow(combo));
   const bombs = cheap.filter((combo) => pow(combo));
   if (winners.length) {
     if (rng() < 0.18) return { action: "pass", reason: "先不要", order: [] };
-    return { action: "play", cardIds: cardIds(winners[0]), reason: "压上家", order: [] };
+    return playDecision(winners[0], "压上家", []);
   }
-  if (bombs.length && rng() < 0.5) return { action: "play", cardIds: cardIds(bombs[0]), reason: "炸弹拦下", order: [] };
+  if (bombs.length && rng() < 0.5) return playDecision(bombs[0], "炸弹拦下", []);
   return { action: "pass", reason: "压不住", order: [] };
 }
 
@@ -530,7 +536,7 @@ function decide(ctx, rng = Math.random) {
   if (ctx.profile.planner === "naive") return easyDecide(ctx, rng);
   const order = rankOrder(ctx, rng);
   const goingOut = order.find(({ item }) => item.c.length === ctx.myCount);
-  if (goingOut) return { action: "play", cardIds: cardIds(goingOut.item.c), reason: "一把走完", order };
+  if (goingOut) return playDecision(goingOut.item.c, "一把走完", order);
   return ctx.current ? follow(ctx, order) : lead(ctx, order);
 }
 
@@ -541,7 +547,7 @@ export function chooseAction(match, seat, levelRank, difficulty = "hard", rng = 
     const fallback = rankOrder(ctx, rng)[0] ?? ctx.candidates[0];
     if (fallback) {
       const combo = fallback.item?.c ?? fallback.c;
-      return { action: "play", cardIds: cardIds(combo), reason: "必须出牌", order: decision.order };
+      return playDecision(combo, "必须出牌", decision.order);
     }
   }
   return decision;
@@ -552,15 +558,16 @@ export function suggestPlays(match, seat, levelRank) {
   const ctx = buildContext(match, seat, levelRank, PROFILE.hard);
   const decision = decide(ctx, () => 0.5);
   const list = [];
-  const push = (action, ids, reason) => {
+  const push = (action, ids, reason, combo = null) => {
     if (!ids.length) return;
-    const key = action + ":" + ids.slice().sort().join(",");
-    if (!list.some((item) => item.key === key)) list.push({ key, action, cardIds: ids, reason });
+    const dedupe = (combo ? combo + "|" : "") + action + ":" + ids.slice().sort().join(",");
+    if (list.some((item) => item.key === dedupe)) return;
+    list.push({ key: dedupe, action, cardIds: ids, reason, comboKey: combo });
   };
-  push(decision.action, decision.cardIds ?? [], decision.reason);
-  for (const { item } of decision.order ?? []) push("play", cardIds(item.c), comboLabel(item.c));
-  if (ctx.current) list.push({ key: "pass", action: "pass", cardIds: [], reason: "不要" });
-  return list.map(({ action, cardIds: ids, reason }) => ({ action, cardIds: ids, reason }));
+  push(decision.action, decision.cardIds ?? [], decision.reason, decision.comboKey ?? null);
+  for (const { item } of decision.order ?? []) push("play", cardIds(item.c), comboLabel(item.c), comboKey(item.c));
+  if (ctx.current) list.push({ key: "pass", action: "pass", cardIds: [], reason: "不要", comboKey: null });
+  return list.map(({ action, cardIds: ids, reason, comboKey: combo }) => ({ action, cardIds: ids, reason, comboKey: combo ?? null }));
 }
 
 export function chooseReturnCard(hand, allowed, levelRank, difficulty = "hard", rng = Math.random) {

@@ -9,7 +9,7 @@ import {
   shuffle,
   sortHand
 } from "./cards.js";
-import { bombPower, canBeat, comboLabel, parseCombo, parseCombos } from "./combos.js";
+import { bombPower, canBeat, comboKey, comboLabel, comboOption, parseCombo, parseCombos } from "./combos.js";
 import { generatePlays } from "./moves.js";
 import { chooseAction, chooseReturnCard, normalizeDifficulty } from "./ai.js";
 
@@ -318,6 +318,10 @@ function endRound(match) {
   }
   match.teamLevel[winTeam] = nextLevel;
   match.bankerTeam = winTeam;
+  // The level card changed hands: re-sort every leftover hand with the new level
+  // so the round-over screen keeps the same order the next deal will use.
+  const levelRank = levelRankOf(match);
+  match.hands = match.hands.map((hand) => sortHand(hand, levelRank));
   match.roundResult = {
     kind: result.kind,
     winTeam,
@@ -340,7 +344,31 @@ function endRound(match) {
   }
 }
 
-export function playCards(match, seat, cardIds, reason = "") {
+function defaultComboOrder(a, b) {
+  if (a.bombPower !== b.bombPower) return b.bombPower - a.bombPower;
+  if (a.type !== b.type) return a.type.localeCompare(b.type);
+  return (a.value ?? a.rank) - (b.value ?? b.rank);
+}
+
+function weakestWinningOrder(a, b) {
+  return (
+    bombPower(a) - bombPower(b) ||
+    (a.value ?? a.rank) - (b.value ?? b.rank) ||
+    a.length - b.length ||
+    a.type.localeCompare(b.type)
+  );
+}
+
+function defaultReading(readings, current) {
+  const ordered = readings.slice().sort(defaultComboOrder);
+  if (!current) return ordered[0] ?? null;
+  const preferredType = !bombPower(current) ? current.type : null;
+  const preferred = preferredType ? ordered.find((item) => item.type === preferredType) : null;
+  if (preferred && canBeat(preferred, current)) return preferred;
+  return readings.filter((item) => canBeat(item, current)).sort(weakestWinningOrder)[0] ?? preferred ?? null;
+}
+
+export function playCards(match, seat, cardIds, reason = "", preferredKey = null, allowAmbiguous = true) {
   if (match.phase !== "play") return { ok: false, error: "还没轮到出牌" };
   if (match.turn !== seat) return { ok: false, error: "没轮到你" };
   const hand = match.hands[seat];
@@ -348,23 +376,30 @@ export function playCards(match, seat, cardIds, reason = "") {
   const cards = cardIds.map((id) => hand.find((card) => card.id === id)).filter(Boolean);
   if (cards.length !== cardIds.length) return { ok: false, error: "手里没有这些牌" };
   const levelRank = levelRankOf(match);
-  const preferred = match.current && !match.current.bombPower ? match.current.type : null;
-  let combo = parseCombo(cards, levelRank, preferred);
-  if (match.current && (!combo || !canBeat(combo, match.current))) {
-    // One card set can read several ways: spaded A2345 is a plain straight and
-    // a flush-straight bomb at the same time. Honour the type hint only while
-    // it still wins, else fall back to the weakest reading that beats.
-    combo =
-      parseCombos(cards, levelRank)
-        .filter((item) => canBeat(item, match.current))
-        .sort(
-          (a, b) =>
-            bombPower(a) - bombPower(b) ||
-            a.rank - b.rank ||
-            a.length - b.length ||
-            a.type.localeCompare(b.type)
-        )[0] ?? combo;
+  const readings = parseCombos(cards, levelRank);
+  let combo = null;
+
+  if (preferredKey) {
+    combo = readings.find((item) => comboKey(item) === preferredKey) ?? null;
+    if (!combo) return { ok: false, error: "选择的牌型组合无效" };
+  } else {
+    const playable = match.current ? readings.filter((item) => canBeat(item, match.current)) : readings;
+    if (!playable.length) {
+      return { ok: false, error: readings.length ? "压不住上家" : "这不是合法牌型" };
+    }
+    if (allowAmbiguous && !match.bots?.[seat] && playable.length > 1) {
+      return {
+        ok: false,
+        ambiguous: true,
+        options: playable
+          .slice()
+          .sort(weakestWinningOrder)
+          .map((item) => comboOption(item))
+      };
+    }
+    combo = defaultReading(readings, match.current);
   }
+
   if (!combo) return { ok: false, error: "这不是合法牌型" };
   if (match.current && !canBeat(combo, match.current)) return { ok: false, error: "压不住上家" };
   if (!match.current && combo.cards.length === 0) return { ok: false, error: "必须出牌" };
@@ -422,7 +457,7 @@ function spectatorView(match, viewerSeat) {
   if (match.hands[viewerSeat].length) return null;
   const partner = partnerOf(viewerSeat);
   if (!match.hands[partner].length) return null;
-  return { seat: partner, name: match.names[partner], hand: match.hands[partner] };
+  return { seat: partner, name: match.names[partner], hand: sortHand(match.hands[partner], levelRankOf(match)) };
 }
 
 // 记牌器：每种点数还剩多少张没露面（已出的和自己手里的都扣掉）
@@ -456,7 +491,7 @@ export function publicState(match, viewerSeat = null) {
     lastPlays: match.lastPlays,
     finishOrder: match.finishOrder,
     handsCount: match.hands.map((hand) => hand.length),
-    hand: viewerSeat == null ? [] : match.hands[viewerSeat],
+    hand: viewerSeat == null ? [] : sortHand(match.hands[viewerSeat], levelRank),
     returnsPlan: match.returnsPlan,
     tributePlan: match.tributePlan,
     tributeRefused: match.tributeRefused ?? [],
@@ -487,7 +522,7 @@ export function autoAct(match, seat, rng = Math.random) {
     decision = null;
   }
   if (decision?.action === "play" && decision.cardIds?.length) {
-    const result = playCards(match, seat, decision.cardIds, decision.reason);
+    const result = playCards(match, seat, decision.cardIds, decision.reason, decision.comboKey ?? null, false);
     if (result.ok) return result;
   }
   if (decision?.action === "pass" && match.current) return passTurn(match, seat, decision.reason);
@@ -495,14 +530,16 @@ export function autoAct(match, seat, rng = Math.random) {
   // Safety net so the table never stalls if the planner finds nothing legal.
   const plays = generatePlays(hand, levelRank, match.current);
   const goingOut = plays.filter((combo) => combo.cards.length === hand.length);
-  if (goingOut.length) return playCards(match, seat, goingOut[0].cards.map((card) => card.id), "一把走完");
+  if (goingOut.length) {
+    return playCards(match, seat, goingOut[0].cards.map((card) => card.id), "一把走完", comboKey(goingOut[0]), false);
+  }
   if (!match.current) {
     const lead = plays[0];
     if (!lead) return { ok: false, error: "无牌可出" };
-    return playCards(match, seat, lead.cards.map((card) => card.id), "领出");
+    return playCards(match, seat, lead.cards.map((card) => card.id), "领出", comboKey(lead), false);
   }
   const cheap = plays.filter((combo) => !combo.bombPower || hand.length <= 8);
   const choice = cheap[0] ?? null;
   if (!choice) return passTurn(match, seat, "压不住");
-  return playCards(match, seat, choice.cards.map((card) => card.id), "压上家");
+  return playCards(match, seat, choice.cards.map((card) => card.id), "压上家", comboKey(choice), false);
 }

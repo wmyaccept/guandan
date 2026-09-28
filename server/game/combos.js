@@ -1,4 +1,13 @@
-import { SEQ_TOP, isHeartLevel, isJoker, pointValue, rankAtPosition, rankValue } from "./cards.js";
+import {
+  SEQ_TOP,
+  SUIT_SYMBOL,
+  isHeartLevel,
+  isJoker,
+  levelLabel,
+  pointValue,
+  rankAtPosition,
+  rankValue
+} from "./cards.js";
 
 export const TYPES = {
   SINGLE: "single",
@@ -100,47 +109,58 @@ function combo(type, cards, rank, extra = {}) {
     copies: extra.copies ?? 1,
     bombSize: extra.bombSize ?? 0,
     bombPower: extra.bombPower ?? 0,
-    run: extra.run ?? 0
+    run: extra.run ?? 0,
+    start: extra.start ?? 0,
+    pairRank: extra.pairRank ?? 0,
+    suit: extra.suit ?? ""
   };
 }
 
-function trySameRank(cards, counts, wilds, copies, type) {
-  if (cards.length !== copies) return null;
+// onlyRank pins the reading to one rank: a lone wild card is worth exactly the
+// level it copies, so it must not fan out into a dozen "single" readings.
+function collectSameRank(cards, counts, wilds, copies, type, onlyRank = 0) {
+  const found = [];
+  if (cards.length !== copies) return found;
   const maxRank = copies <= 2 ? 17 : 15;
-  for (let rank = 3; rank <= maxRank; rank += 1) {
+  const from = onlyRank || 3;
+  const to = onlyRank || maxRank;
+  for (let rank = from; rank <= to; rank += 1) {
     if (rank >= 16 && wilds > 0) continue;
-    const have = counts[rank];
+    const have = counts[rank] ?? 0;
     if (have > copies) continue;
     if (have + wilds === copies && leftoverNaturals(counts, { [rank]: have })) {
-      return combo(type, cards, rank, { copies });
+      found.push(combo(type, cards, rank, { copies }));
     }
   }
-  return null;
+  return found;
 }
 
-function tryBomb(cards, counts, wilds) {
-  if (cards.length < 4) return null;
+function collectBombs(cards, counts, wilds) {
+  const found = [];
+  if (cards.length < 4) return found;
   if (cards.length === 4 && cards.every(isJoker)) {
-    return combo(TYPES.JOKER_BOMB, cards, 17, { bombSize: 11, bombPower: 900 });
+    found.push(combo(TYPES.JOKER_BOMB, cards, 17, { bombSize: 11, bombPower: 900 }));
+    return found;
   }
-  if (cards.some(isJoker)) return null;
+  if (cards.some(isJoker)) return found;
   for (let rank = 3; rank <= 15; rank += 1) {
     const have = counts[rank];
     if (have === 0 && wilds !== cards.length) continue;
     if (have + wilds === cards.length && leftoverNaturals(counts, { [rank]: have })) {
-      return combo(TYPES.BOMB, cards, rank, {
+      found.push(combo(TYPES.BOMB, cards, rank, {
         copies: cards.length,
         bombSize: cards.length,
         bombPower: cards.length * 10
-      });
+      }));
     }
   }
-  return null;
+  return found;
 }
 
-function tryRun(cards, counts, wilds, copies, runLen, type) {
-  if (cards.length !== copies * runLen) return null;
-  if (Object.keys(counts).some((rank) => Number(rank) >= 16 && counts[rank] > 0)) return null;
+function collectRuns(cards, counts, wilds, copies, runLen, type) {
+  const found = [];
+  if (cards.length !== copies * runLen) return found;
+  if (Object.keys(counts).some((rank) => Number(rank) >= 16 && counts[rank] > 0)) return found;
   // combo.rank 记的是这手连牌的最高“位置”，A 当小时最高位是 5，所以
   // A2345 < 23456 < ... < 10JQKA，比较时不会被级牌抬起来。
   for (let start = 1; start + runLen - 1 <= SEQ_TOP; start += 1) {
@@ -159,14 +179,19 @@ function tryRun(cards, counts, wilds, copies, runLen, type) {
     }
     if (!valid || need > wilds) continue;
     if (leftoverNaturals(counts, consume)) {
-      return combo(type, cards, start + runLen - 1, { copies, run: runLen });
+      found.push(combo(type, cards, start + runLen - 1, {
+        copies,
+        run: runLen,
+        start
+      }));
     }
   }
-  return null;
+  return found;
 }
 
-function tryFullHouse(cards, counts, wilds) {
-  if (cards.length !== 5) return null;
+function collectFullHouses(cards, counts, wilds) {
+  const found = [];
+  if (cards.length !== 5) return found;
   for (let triple = 3; triple <= 15; triple += 1) {
     // 带的一对可以是一对王（小王小王 / 大王大王），王必须是真牌，逢人配变不出来
     for (let pair = 3; pair <= 17; pair += 1) {
@@ -181,52 +206,59 @@ function tryFullHouse(cards, counts, wilds) {
         [triple]: Math.min(3, counts[triple] ?? 0),
         [pair]: Math.min(2, havePair)
       })) {
-        return combo(TYPES.FULL_HOUSE, cards, triple, { copies: 3 });
+        found.push(combo(TYPES.FULL_HOUSE, cards, triple, {
+          copies: 3,
+          pairRank: pair
+        }));
       }
     }
   }
-  return null;
+  return found;
 }
 
-function tryFlushStraight(cards, counts, wilds, naturalCards) {
-  if (cards.length !== 5) return null;
-  if (naturalCards.some(isJoker)) return null;
+function collectFlushStraights(cards, counts, wilds, naturalCards) {
+  const found = [];
+  if (cards.length !== 5) return found;
+  if (naturalCards.some(isJoker)) return found;
   const suitGroups = { S: 0, H: 0, D: 0, C: 0 };
   for (const card of naturalCards) suitGroups[card.suit] += 1;
   const usedSuits = Object.entries(suitGroups).filter(([, n]) => n > 0);
-  if (usedSuits.length > 1) return null;
+  if (usedSuits.length > 1) return found;
   const suit = usedSuits.length === 1 ? usedSuits[0][0] : "H";
-  const straight = tryRun(cards, counts, wilds, 1, 5, TYPES.FLUSH_STRAIGHT);
-  if (!straight) return null;
-  return combo(TYPES.FLUSH_STRAIGHT, cards, straight.rank, {
-    copies: 1,
-    run: 5,
-    bombSize: 5,
-    bombPower: 55,
-    suit
-  });
+  for (const run of collectRuns(cards, counts, wilds, 1, 5, TYPES.FLUSH_STRAIGHT)) {
+    found.push(combo(TYPES.FLUSH_STRAIGHT, cards, run.rank, {
+      copies: 1,
+      run: 5,
+      start: run.start,
+      bombSize: 5,
+      bombPower: 55,
+      suit
+    }));
+  }
+  return found;
 }
 
-function interpretationsForSplit(cards, naturalCards, wilds) {
+function interpretationsForSplit(cards, naturalCards, wilds, levelRank) {
   const { counts } = countNaturals(naturalCards);
   const found = [];
-  const add = (item) => {
-    if (item) found.push(item);
+  const addAll = (items) => {
+    for (const item of items) found.push(item);
   };
 
-  add(trySameRank(cards, counts, wilds, 1, TYPES.SINGLE));
-  add(trySameRank(cards, counts, wilds, 2, TYPES.PAIR));
-  add(trySameRank(cards, counts, wilds, 3, TYPES.TRIPLE));
-  add(tryFullHouse(cards, counts, wilds));
-  add(tryRun(cards, counts, wilds, 1, 5, TYPES.STRAIGHT));
+  const loneWild = cards.length === 1 && wilds === 1 && naturalCards.length === 0;
+  addAll(collectSameRank(cards, counts, wilds, 1, TYPES.SINGLE, loneWild ? levelRank : 0));
+  addAll(collectSameRank(cards, counts, wilds, 2, TYPES.PAIR));
+  addAll(collectSameRank(cards, counts, wilds, 3, TYPES.TRIPLE));
+  addAll(collectFullHouses(cards, counts, wilds));
+  addAll(collectRuns(cards, counts, wilds, 1, 5, TYPES.STRAIGHT));
   // House rule: pair sequences are exactly three pairs and steel plates
   // exactly two triples, so both shapes are six cards and nothing longer.
   if (cards.length === 6) {
-    add(tryRun(cards, counts, wilds, 2, 3, TYPES.PAIR_SEQ));
-    add(tryRun(cards, counts, wilds, 3, 2, TYPES.TRIPLE_SEQ));
+    addAll(collectRuns(cards, counts, wilds, 2, 3, TYPES.PAIR_SEQ));
+    addAll(collectRuns(cards, counts, wilds, 3, 2, TYPES.TRIPLE_SEQ));
   }
-  add(tryFlushStraight(cards, counts, wilds, naturalCards));
-  add(tryBomb(cards, counts, wilds));
+  addAll(collectFlushStraights(cards, counts, wilds, naturalCards));
+  addAll(collectBombs(cards, counts, wilds));
   return found;
 }
 
@@ -244,18 +276,34 @@ export function parseCombos(cards, levelRank) {
     }
     const naturalCards = cards.filter((_, index) => !wildSet.has(index));
     const wilds = wildSet.size;
-    for (const item of interpretationsForSplit(cards, naturalCards, wilds)) {
+    for (const item of interpretationsForSplit(cards, naturalCards, wilds, levelRank)) {
       item.value = compareValue(item, levelRank);
-      const key = `${item.type}-${item.rank}-${item.length}-${item.bombPower}`;
+      const key = comboKey(item);
       if (!unique.has(key)) unique.set(key, item);
     }
   }
   return [...unique.values()];
 }
 
-export function parseCombo(cards, levelRank, preferredType = null) {
+export function comboKey(item) {
+  if (!item) return "";
+  return [
+    item.type,
+    item.rank,
+    item.length,
+    item.copies,
+    item.bombPower,
+    item.run,
+    item.start,
+    item.pairRank,
+    item.suit
+  ].join(":");
+}
+
+export function parseCombo(cards, levelRank, preferredType = null, preferredKey = null) {
   const found = parseCombos(cards, levelRank);
   if (!found.length) return null;
+  if (preferredKey) return found.find((item) => comboKey(item) === preferredKey) ?? null;
   if (preferredType) {
     const match = found.find((item) => item.type === preferredType);
     if (match) return match;
@@ -307,7 +355,7 @@ export function legalPlays(hand, levelRank, current) {
     const combos = parseCombos(cards, levelRank);
     for (const combo of combos) {
       if (!canBeat(combo, current)) continue;
-      const key = combo.cards.map((card) => card.id).sort().join(",") + combo.type;
+      const key = combo.cards.map((card) => card.id).sort().join(",") + comboKey(combo);
       if (seen.has(key)) continue;
       seen.add(key);
       plays.push(combo);
@@ -377,12 +425,48 @@ function legalPlaysHeuristic(hand, levelRank, current) {
   return plays;
 }
 
+function runDetail(item) {
+  const parts = [];
+  for (let offset = 0; offset < item.run; offset += 1) {
+    const rank = rankAtPosition(item.start + offset);
+    const label = levelLabel(rank);
+    parts.push(item.copies === 2 ? label + label : item.copies === 3 ? label + label + label : label);
+  }
+  return parts.join("");
+}
+
 export function comboLabel(combo, levelRank) {
   if (!combo) return "";
   if (combo.type === TYPES.JOKER_BOMB) return "天王炸";
   if (combo.type === TYPES.BOMB) return `${combo.length}炸`;
   if (combo.type === TYPES.FLUSH_STRAIGHT) return "同花顺";
   return combo.label;
+}
+
+export function comboOption(item) {
+  if (!item) return null;
+  let detail = comboLabel(item);
+  if (item.type === TYPES.SINGLE) detail = levelLabel(item.rank);
+  if (item.type === TYPES.PAIR) detail = levelLabel(item.rank) + "对";
+  if (item.type === TYPES.TRIPLE) detail = levelLabel(item.rank) + "三张";
+  if (item.type === TYPES.FULL_HOUSE) {
+    detail = levelLabel(item.rank) + "三张 + " + levelLabel(item.pairRank) + "一对";
+  }
+  if (item.type === TYPES.STRAIGHT) detail = runDetail(item);
+  if (item.type === TYPES.PAIR_SEQ) detail = runDetail(item) + " 连对";
+  if (item.type === TYPES.TRIPLE_SEQ) detail = runDetail(item) + " 钢板";
+  if (item.type === TYPES.FLUSH_STRAIGHT) {
+    detail = (SUIT_SYMBOL[item.suit] ?? "") + runDetail(item) + " 同花";
+  }
+  if (item.type === TYPES.BOMB) detail = item.length + "张" + levelLabel(item.rank);
+  if (item.type === TYPES.JOKER_BOMB) detail = "小王小王 + 大王大王";
+  return {
+    key: comboKey(item),
+    type: item.type,
+    label: comboLabel(item),
+    detail,
+    cards: item.cards.map((card) => card.id)
+  };
 }
 
 export function smallestLead(hand, levelRank) {
