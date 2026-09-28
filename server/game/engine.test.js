@@ -422,6 +422,18 @@ test("leading with a wild card asks the player which reading to play", () => {
   assert.equal(match.current.rank, 14);
 });
 
+test("allowAmbiguous lets the caller force a reading for a human seat", () => {
+  const match = wildHandMatch();
+  match.leadSeat = 0;
+  const ids = match.hands[0].map((card) => card.id);
+  const asked = playCards(match, 0, ids, "", null, true);
+  assert.equal(asked.ok, false);
+  assert.equal(asked.ambiguous, true);
+  const forced = playCards(match, 0, ids, "", null, false);
+  assert.equal(forced.ok, true);
+  assert.equal(match.current.type, TYPES.FULL_HOUSE);
+});
+
 test("a wild card fills the only winning reading without asking", () => {
   const match = wildHandMatch();
   match.leadSeat = 1;

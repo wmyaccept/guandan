@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { attachSockets } from "./rooms.js";
+import { attachSockets, roomForTest } from "./rooms.js";
+import { comboKey, parseCombos } from "./game/combos.js";
+import { playCards } from "./game/engine.js";
 
 function makeIo() {
   const io = { sockets: { sockets: new Map() }, connect: null };
@@ -243,6 +245,79 @@ test("旧连接仍被判为在线时，凭令牌也能收回原座位", (t) => {
   assert.equal(back.you, 0, "凭令牌应该收回原座位");
   assert.equal(back.match.hand.map((card) => card.id).join(","), handBefore, "手牌应该原样保留");
   assert.equal(back.seats.filter((seat) => seat && seat.connected).length, 4, "不应该多占座位");
+});
+
+test("刷新回座后仍然是真人，歧义出牌不会自动替他选", (t) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => mock.timers.reset());
+
+  const io = makeIo();
+  attachSockets(io);
+  const first = makeSocket(io, "s1");
+  io.connect(first);
+  first.fire("create", { name: "小明" });
+  first.fire("fillBots");
+  first.fire("start");
+  const code = first.last("state").code;
+
+  first.fire("disconnect");
+  first.fire("join", { name: "小明", code });
+  const back = first.last("state");
+  assert.equal(back.you, 0, "刷新后应该回到原座位");
+  assert.equal(back.seats[0].bot, false);
+});
+
+test("刷新回座后，出歧义牌会重新询问而不是替玩家自动选", (t) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => mock.timers.reset());
+
+  const io = makeIo();
+  attachSockets(io);
+  const host = makeSocket(io, "h1");
+  io.connect(host);
+  host.fire("create", { name: "小明" });
+  host.fire("fillBots");
+  host.fire("start");
+  const code = host.last("state").code;
+
+  host.fire("disconnect");
+  const back = makeSocket(io, "h2");
+  io.connect(back);
+  back.fire("join", { name: "小明", code });
+
+  // 用一手 66 + 逢人配(红桃5) + 22 复现截图里的争议牌型
+  const match = roomForTest(code).match;
+  const mk = (suit, rank, deck) => ({ id: "d" + deck + suit + rank, deck, suit, rank });
+  match.teamLevel = [5, 5];
+  match.bankerTeam = 0;
+  match.round = 1;
+  match.phase = "play";
+  match.finishOrder = [];
+  match.current = null;
+  match.lastPlay = null;
+  match.lastPlays = [null, null, null, null];
+  match.passes = 0;
+  match.turn = 0;
+  match.leadSeat = 0;
+  match.hands = [
+    [mk("D", 6, 0), mk("H", 6, 0), mk("H", 5, 0), mk("D", 15, 0), mk("S", 15, 0)],
+    [mk("S", 3, 0)],
+    [mk("S", 4, 0)],
+    [mk("S", 7, 0)]
+  ];
+  assert.equal(match.bots[0], false, "回座后引擎不能还把这个座位当机器人");
+
+  const readings = parseCombos(match.hands[0], 5);
+  assert.equal(readings.length, 2, "这手牌应该有两种合法解释");
+  const ids = match.hands[0].map((card) => card.id);
+
+  back.fire("play", { cardIds: ids });
+  const choice = back.last("comboChoice");
+  assert.ok(choice, "真人出歧义牌应该收到选择弹窗");
+  assert.equal(choice.options.length, 2);
+
+  const solo = playCards(match, 0, ids, "", comboKey(readings[0]));
+  assert.equal(solo.ok, true, "明确指定牌型时应该能直接出牌");
 });
 
 test("点击头像可以砸蛋送花，非法目标和连点会被忽略", (t) => {

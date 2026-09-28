@@ -387,7 +387,13 @@ export function playCards(match, seat, cardIds, reason = "", preferredKey = null
     if (!playable.length) {
       return { ok: false, error: readings.length ? "压不住上家" : "这不是合法牌型" };
     }
-    if (allowAmbiguous && !match.bots?.[seat] && playable.length > 1) {
+    if (
+      allowAmbiguous &&
+      playable.length > 1 &&
+      // The live seat controller decides; a cached bots array goes stale
+      // when a player refreshes back into a seat the server gave to a bot.
+      !match.bots?.[seat]
+    ) {
       return {
         ok: false,
         ambiguous: true,

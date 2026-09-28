@@ -2,6 +2,11 @@ import { chooseReturnCard, normalizeDifficulty, suggestPlays } from "./game/ai.j
 import { autoAct, createMatch, levelRankOf, playCards, passTurn, publicState, returnableCards, returnTribute, startRound } from "./game/engine.js";
 
 const rooms = new Map();
+
+// Exposed for the socket tests so they can drive an in-match table directly.
+export function roomForTest(code) {
+  return getRoom(code);
+}
 const socketRoom = new Map();
 const BOT_DELAY_MS = 2800;
 const TURN_LIMIT_MS = 60000;
@@ -88,6 +93,13 @@ function namesOf(room) {
 
 function botsOf(room) {
   return room.seats.map((seat) => Boolean(seat?.bot));
+}
+
+// Keep the engine's controller map aligned with the live table. Deal-time bots
+// can be replaced or reclaimed without rebuilding the match.
+function syncBots(room) {
+  if (!room?.match) return;
+  room.match.bots = botsOf(room);
 }
 
 function filled(room) {
@@ -214,6 +226,10 @@ export function attachSockets(io) {
         hosted: false,
         token: mine || prev?.token || null
       };
+      // A refresh can reclaim a seat the server already handed to a bot. Keep
+      // the match's live controller map in sync so the engine still treats the
+      // returning human as a human.
+      syncBots(room);
       dropStaleSocket(io, prev, socket.id);
       socketRoom.set(socket.id, room.code);
       socket.join(room.code);
@@ -239,6 +255,7 @@ export function attachSockets(io) {
         token: room.seats[from].token || null
       };
       room.seats[from] = null;
+      syncBots(room);
       broadcast(io, room);
     });
 
@@ -254,6 +271,7 @@ export function attachSockets(io) {
         room.seats[seat] = inMatch
           ? { ...room.seats[seat], socketId: null, bot: true, hosted: true }
           : null;
+        syncBots(room);
         if (room.hostId === socket.id) {
           const next = room.seats.find((item) => item?.socketId);
           room.hostId = next ? next.socketId : null;
