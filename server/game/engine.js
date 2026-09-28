@@ -434,7 +434,10 @@ export function passTurn(match, seat, reason = "") {
   match.passes += 1;
 
   const remaining = [0, 1, 2, 3].filter((item) => match.hands[item].length > 0);
-  if (match.passes >= remaining.length - 1) {
+  // A trick ends only after every player who still holds cards has passed.
+  // The old "remaining - 1" check cut the trick short once a player had gone
+  // out, so the last seat never got its chance to beat the play.
+  if (match.passes >= remaining.length && match.phase === "play") {
     const winner = match.leadSeat;
     match.current = null;
     match.passes = 0;

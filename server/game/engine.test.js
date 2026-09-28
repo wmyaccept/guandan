@@ -254,6 +254,42 @@ test("双下提前结束：同队包揽头二游就不再往下打", () => {
   assert.equal(match.hands[3].length, 3);
 });
 
+test("出完牌的玩家要等其余在场的人都不要后才接风", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [[tc("S", 3)], [tc("S", 4)], [tc("S", 5)], [tc("S", 9)]];
+  match.turn = 0;
+  assert.equal(playCards(match, 0, [match.hands[0][0].id]).ok, true);
+
+  assert.equal(passTurn(match, 1).ok, true);
+  assert.equal(match.current !== null, true, "one pass must not end the trick");
+  assert.equal(passTurn(match, 2).ok, true);
+  assert.equal(match.turn, 3, "the last live seat must still get a turn");
+  assert.equal(match.current !== null, true, "two passes must not end the trick either");
+
+  assert.equal(playCards(match, 3, [match.hands[3][0].id]).ok, true);
+  assert.equal(match.leadSeat, 3);
+  assert.equal(match.turn, 1);
+});
+
+test("三家都不要之后才由出完牌一方的队友接风", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [[tc("S", 3)], [tc("S", 4)], [tc("S", 5)], [tc("S", 6)]];
+  match.turn = 0;
+  assert.equal(playCards(match, 0, [match.hands[0][0].id]).ok, true);
+
+  assert.equal(passTurn(match, 1).ok, true);
+  assert.equal(passTurn(match, 2).ok, true);
+  assert.equal(passTurn(match, 3).ok, true);
+  assert.equal(match.current, null);
+  assert.equal(match.turn, (0 + 2) % 4);
+  assert.equal(match.log.some((line) => line.includes("接风")), true);
+  assert.equal(match.log.at(-1), "丙 接风");
+});
+
 test("记牌器只统计还没露面的牌", () => {
   const match = createMatch(["甲", "乙", "丙", "丁"]);
   match.phase = "play";

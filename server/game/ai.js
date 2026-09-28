@@ -356,7 +356,7 @@ function buildContext(match, seat, levelRank, profile) {
   }));
   const winnerCount = winnerSeat == null ? 0 : handsCount[winnerSeat];
   const partnerIsHead = match.finishOrder[0] === partner;
-  const lastToAct = Boolean(current) && match.passes + 1 >= alive.length - 1;
+  const lastToAct = Boolean(current) && match.passes + 1 >= alive.length;
   const stopNeeded =
     Boolean(current) &&
     profile.stopAware &&
