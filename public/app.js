@@ -405,7 +405,7 @@ function cardClass(card, levelRank) {
   return classes.join(" ");
 }
 
-function renderCard(card, levelRank) {
+function renderCard(card, levelRank, representedRank = null) {
   const div = document.createElement("button");
   div.type = "button";
   div.className = cardClass(card, levelRank);
@@ -413,9 +413,12 @@ function renderCard(card, levelRank) {
   const rank = RANK[card.rank];
   const suit = SUIT[card.suit] ?? "";
   const wild = card.suit === "H" && card.rank === levelRank;
+  const wildLabel = representedRank == null
+    ? "配"
+    : "配" + (RANK[representedRank] ?? representedRank);
   div.innerHTML = '<span class="pip">' + suit + '</span>' +
     '<span class="corner"><strong>' + rank + '</strong><small>' + suit + '</small></span>' +
-    (wild ? '<span class="wild-mark">配</span>' : '');
+    (wild ? '<span class="wild-mark">' + wildLabel + '</span>' : '');
   return div;
 }
 
@@ -484,6 +487,7 @@ function groupSelected() {
   next.splice(Math.max(0, Math.min(firstIndex, next.length)), 0, ids);
   handPiles = next;
   handPilesCustom = true;
+  selected.clear();
   if (state) renderHand(state.match);
 }
 
@@ -559,7 +563,28 @@ function renderSelf(room) {
   el.classList.toggle("turn", Boolean(match && you === match.turn && (match.phase === "play" || match.phase === "returnTribute")));
 }
 
+function hasModestReturnCard(cards, levelRank) {
+  // 2的内部等级是15，还贡时2到10都可以还。
+  return cards.some(
+    (card) => ((card.rank >= 3 && card.rank <= 10) || card.rank === 15) && card.rank !== levelRank
+  );
+}
+
+function canPickForReturn(card, match, cards = effectiveHand(match)) {
+  // 级牌不能还；手里没有2到10的牌时才放开兜底，但级牌仍排除。
+  if (!hasModestReturnCard(cards, match.levelRank)) return card.rank !== match.levelRank;
+  return ((card.rank >= 3 && card.rank <= 10) || card.rank === 15) && card.rank !== match.levelRank;
+}
+
 function toggleSelect(id, node) {
+  const match = state?.match;
+  if (match?.phase === "returnTribute") {
+    const card = effectiveHand(match).find((item) => item.id === id);
+    if (card && !canPickForReturn(card, match)) {
+      toast("还贡只能选2至10且不是当前级牌的牌");
+      return;
+    }
+  }
   if (selected.has(id)) selected.delete(id);
   else selected.add(id);
   node.classList.toggle("up", selected.has(id));
@@ -569,6 +594,8 @@ let pendingComboChoice = null;
 
 function closeComboChoice() {
   pendingComboChoice = null;
+  selected.clear();
+  if (state) renderHand(state.match);
   $("comboChoice")?.classList.add("hidden");
 }
 
@@ -721,6 +748,7 @@ function renderHand(match) {
   const cards = effectiveHand(match);
   syncPiles(cards);
   const byId = new Map(cards.map((card) => [card.id, card]));
+  const returning = match?.phase === "returnTribute";
   handPiles.forEach((pile, index) => {
     const col = document.createElement("div");
     col.className = "pile";
@@ -730,6 +758,7 @@ function renderHand(match) {
       if (!card) continue;
       const node = renderCard(card, match.levelRank);
       if (selected.has(card.id)) node.classList.add("up");
+      if (returning && !canPickForReturn(card, match, cards)) node.classList.add("return-invalid");
       col.append(node);
     }
     hand.append(col);
@@ -1068,6 +1097,86 @@ function sortRun(combo, cards, levelRank) {
   return cards.slice().sort((a, b) => slot.get(a.id) - slot.get(b.id) || String(a.suit).localeCompare(String(b.suit)));
 }
 
+function wildRepresentations(combo, cards, levelRank) {
+  const reps = new Map();
+  const isWild = (card) => card.suit === "H" && card.rank === levelRank;
+  const wilds = cards.filter(isWild);
+  if (!wilds.length) return reps;
+  const mark = (card, rank) => reps.set(card.id, rank);
+
+  if (["single", "pair", "triple", "bomb"].includes(combo.type)) {
+    for (const card of wilds) mark(card, combo.rank);
+    return reps;
+  }
+
+  if (combo.type === "fullhouse") {
+    let tripleSlots = 3;
+    let pairSlots = 2;
+    const fillExact = (rank, slots) => {
+      for (const card of cards) {
+        if (slots <= 0) break;
+        if (isWild(card) || card.rank !== rank) continue;
+        slots -= 1;
+      }
+      for (const card of wilds) {
+        if (slots <= 0) break;
+        if (card.rank !== rank || reps.has(card.id)) continue;
+        mark(card, rank);
+        slots -= 1;
+      }
+      return slots;
+    };
+    tripleSlots = fillExact(combo.rank, tripleSlots);
+    pairSlots = fillExact(combo.pairRank, pairSlots);
+    for (const card of wilds) {
+      if (reps.has(card.id)) continue;
+      if (tripleSlots > 0) {
+        mark(card, combo.rank);
+        tripleSlots -= 1;
+      } else if (pairSlots > 0) {
+        mark(card, combo.pairRank);
+        pairSlots -= 1;
+      } else {
+        mark(card, combo.rank);
+      }
+    }
+    return reps;
+  }
+
+  if (["straight", "pairseq", "tripleseq", "flushstraight"].includes(combo.type)) {
+    const len = runLength(combo);
+    const copies = combo.type === "tripleseq" ? 3 : combo.type === "pairseq" ? 2 : 1;
+    const start = combo.start || combo.rank - len + 1;
+    const slots = [];
+    for (let offset = 0; offset < len; offset += 1) {
+      const rank = posRank(start + offset);
+      for (let copy = 0; copy < copies; copy += 1) slots.push(rank);
+    }
+    const used = new Set();
+    for (const rank of slots) {
+      const natural = cards.find((card) => !used.has(card.id) && !isWild(card) && card.rank === rank);
+      if (natural) used.add(natural.id);
+    }
+    for (const rank of slots) {
+      const exactWild = wilds.find((card) => !used.has(card.id) && card.rank === rank);
+      if (!exactWild) continue;
+      used.add(exactWild.id);
+      mark(exactWild, rank);
+    }
+    for (const rank of slots) {
+      const wild = wilds.find((card) => !used.has(card.id));
+      if (!wild) break;
+      used.add(wild.id);
+      mark(wild, rank);
+    }
+    for (const card of wilds) if (!reps.has(card.id)) mark(card, combo.rank);
+    return reps;
+  }
+
+  for (const card of wilds) mark(card, combo.rank);
+  return reps;
+}
+
 function sortComboCards(combo, levelRank) {
   const cards = combo.cards ?? [];
   if (["straight", "pairseq", "tripleseq", "flushstraight"].includes(combo.type)) {
@@ -1105,8 +1214,10 @@ function renderTrick(match) {
   trick.className = "trick fx-" + combo.type;
   trick.innerHTML = "";
   const group = FX_GROUP[combo.type] ?? 1;
-  sortComboCards(combo, match.levelRank).forEach((card, index) => {
-    const node = renderCard(card, match.levelRank);
+  const cards = sortComboCards(combo, match.levelRank);
+  const represented = wildRepresentations(combo, cards, match.levelRank);
+  cards.forEach((card, index) => {
+    const node = renderCard(card, match.levelRank, represented.get(card.id));
     node.style.setProperty("--i", String(index));
     node.style.setProperty("--g", String(Math.floor(index / group)));
     trick.append(node);
@@ -1249,7 +1360,9 @@ function renderNotice(match) {
   if (match.phase === "returnTribute" && match.turn === you) {
     const tip = document.createElement("span");
     tip.className = "notice-tip";
-    tip.textContent = "\u9009\u4e00\u5f20\u724c\u70b9\u201c\u8fd8\u8d21\u201d\uff0c\u4e0d\u9009\u5219\u81ea\u52a8\u8fd8\u5c0f\u724c";
+    tip.textContent = hasModestReturnCard(effectiveHand(match), match.levelRank)
+      ? "还贡只能选2至10且不是当前级牌的牌"
+      : "手里没有2至10的牌，将自动还最小牌";
     el.append(tip);
   }
   el.classList.remove("hidden");
@@ -1383,6 +1496,7 @@ $("playBtn").addEventListener("click", () => {
 $("passBtn").addEventListener("click", () => socket.emit("pass"));
 $("groupBtn").addEventListener("click", groupSelected);
 $("hintBtn").addEventListener("click", () => socket.emit("hint"));
+$("comboChoiceClose").addEventListener("click", closeComboChoice);
 
 /* ---------------- appearance panel and bot strength ---------------- */
 const DIFF_LEVELS = ["easy", "medium", "hard"];

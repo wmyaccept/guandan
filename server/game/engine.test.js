@@ -218,6 +218,51 @@ test("还贡完成后由进贡方先出", () => {
   assert.match(match.tributeSummary.at(-1), /还贡/);
 });
 
+test("还贡时2是合法牌，可以正常还出", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.teamLevel = [5, 5];
+  match.phase = "returnTribute";
+  match.hands = [
+    [tc("S", 15), tc("S", 9), tc("S", 12)],
+    [tc("S", 4)],
+    [tc("S", 6)],
+    [tc("S", 7)]
+  ];
+  match.returnsPlan = [{ from: 0, to: 1 }];
+  const two = match.hands[0][0];
+
+  const done = returnTribute(match, 0, two.id);
+  assert.equal(done.ok, true);
+  assert.equal(match.hands[0].some((card) => card.id === two.id), false);
+  assert.equal(match.hands[1].some((card) => card.id === two.id), true);
+});
+
+test("还贡不能还当前级牌，也不能静默换成别的牌", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.teamLevel = [5, 5];
+  match.phase = "returnTribute";
+  match.hands = [
+    [tc("S", 5), tc("S", 15), tc("H", 5)],
+    [tc("S", 4)],
+    [tc("S", 7)],
+    [tc("S", 8)]
+  ];
+  match.returnsPlan = [{ from: 0, to: 1 }];
+
+  const levelCard = match.hands[0][0];
+  const rejected = returnTribute(match, 0, levelCard.id);
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /级牌/);
+  assert.equal(match.hands[0].length, 3);
+  assert.deepEqual(match.returnsPlan, [{ from: 0, to: 1 }]);
+
+  // 非级牌的2（内部等级15）可以还。
+  const two = match.hands[0][1];
+  const done = returnTribute(match, 0, two.id);
+  assert.equal(done.ok, true);
+  assert.equal(match.hands[1].some((card) => card.id === two.id), true);
+});
+
 test("抗贡之后由头游先出", () => {
   const match = matchWithFinish([0, 1, 2, 3]);
   match.hands = [
@@ -271,6 +316,23 @@ test("出完牌的玩家要等其余在场的人都不要后才接风", () => {
   assert.equal(playCards(match, 3, [match.hands[3][0].id]).ok, true);
   assert.equal(match.leadSeat, 3);
   assert.equal(match.turn, 1);
+});
+
+test("领出者不用再对自己的牌点一次不要", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [[tc("S", 3), tc("S", 13)], [tc("S", 4)], [tc("S", 5)], [tc("S", 6)]];
+  match.turn = 0;
+  assert.equal(playCards(match, 0, [match.hands[0][0].id]).ok, true);
+
+  assert.equal(passTurn(match, 1).ok, true);
+  assert.equal(passTurn(match, 2).ok, true);
+  assert.equal(passTurn(match, 3).ok, true);
+  assert.equal(match.current, null);
+  assert.equal(match.passes, 0);
+  assert.equal(match.turn, 0);
+  assert.equal(match.log.at(-1), "甲 继续出");
 });
 
 test("三家都不要之后才由出完牌一方的队友接风", () => {
@@ -389,6 +451,26 @@ test("同花顺 A2345 能压住更大的普通顺子", () => {
   assert.equal(match.current.type, TYPES.FLUSH_STRAIGHT);
   assert.equal(match.hands[0].length, 0);
 });
+
+test("天然同花顺只按同花顺出，不询问普通顺子解读", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [
+    [tc("S", 4), tc("S", 5), tc("S", 6), tc("S", 7), tc("S", 8)],
+    [tc("H", 9)],
+    [tc("H", 10)],
+    [tc("H", 11)]
+  ];
+  match.current = parseCombo([tc("S", 3), tc("H", 4), tc("D", 5), tc("C", 6), tc("S", 7)], 5);
+  match.turn = 0;
+
+  const result = playCards(match, 0, match.hands[0].map((card) => card.id));
+  assert.equal(result.ok, true, result.error ?? "");
+  assert.equal(result.ambiguous, undefined);
+  assert.equal(match.current.type, TYPES.FLUSH_STRAIGHT);
+});
+
 function wildHandMatch() {
   const match = createMatch(["A", "B", "C", "D"]);
   match.teamLevel = [5, 5];

@@ -9,7 +9,7 @@ import {
   shuffle,
   sortHand
 } from "./cards.js";
-import { bombPower, canBeat, comboKey, comboLabel, comboOption, parseCombo, parseCombos } from "./combos.js";
+import { TYPES, bombPower, canBeat, comboKey, comboLabel, comboOption, parseCombo, parseCombos } from "./combos.js";
 import { generatePlays } from "./moves.js";
 import { chooseAction, chooseReturnCard, normalizeDifficulty } from "./ai.js";
 
@@ -194,10 +194,20 @@ function applyTribute(match) {
   }
 }
 
+function modestReturnCards(hand, levelRank) {
+  // 还贡只能还2到10且不是当前级牌的牌（2的内部等级是15）。
+  return hand.filter(
+    (card) => ((card.rank >= 3 && card.rank <= 10) || card.rank === 15) && card.rank !== levelRank
+  );
+}
+
 export function returnableCards(hand, levelRank) {
-  const modest = hand.filter((card) => card.rank >= 3 && card.rank <= 10 && !isHeartLevel(card, levelRank));
+  const modest = modestReturnCards(hand, levelRank);
   if (modest.length) return modest;
-  return hand.slice().sort((a, b) => compareCards(a, b, levelRank));
+  // 手里没有2到10的牌时兜底，但级牌仍然不能还。
+  return hand
+    .filter((card) => card.rank !== levelRank)
+    .sort((a, b) => compareCards(a, b, levelRank));
 }
 
 export function startRound(match, rng = Math.random) {
@@ -250,8 +260,16 @@ export function returnTribute(match, seat, cardId) {
   if (match.phase !== "returnTribute") return { ok: false, error: "现在不是还贡阶段" };
   const step = match.returnsPlan.find((item) => item.from === seat);
   if (!step) return { ok: false, error: "还没轮到你还贡" };
-  const allowed = returnableCards(match.hands[seat], levelRankOf(match));
-  const card = allowed.find((item) => item.id === cardId) ?? allowed[0];
+  const levelRank = levelRankOf(match);
+  const modest = modestReturnCards(match.hands[seat], levelRank);
+  const allowed = modest.length ? modest : returnableCards(match.hands[seat], levelRank);
+  const picked = allowed.find((item) => item.id === cardId);
+  // 手里没有2到10的牌时，才允许按最小牌兜底；有可还的牌时，
+  // 选级牌或11以上的牌都必须直接拒绝，不能静默换成别的牌。
+  const card = picked ?? ((cardId == null || !modest.length) ? allowed[0] : null);
+  if (!card && modest.length) {
+    return { ok: false, error: "还贡只能选2至10且不是当前级牌的牌" };
+  }
   if (!card) return { ok: false, error: "没有可还的牌" };
   const taken = takeCard(match.hands[seat], card.id);
   giveCard(match, seat, step.to, taken);
@@ -377,6 +395,7 @@ export function playCards(match, seat, cardIds, reason = "", preferredKey = null
   if (cards.length !== cardIds.length) return { ok: false, error: "手里没有这些牌" };
   const levelRank = levelRankOf(match);
   const readings = parseCombos(cards, levelRank);
+  const hasWildcard = cards.some((card) => isHeartLevel(card, levelRank));
   let combo = null;
 
   if (preferredKey) {
@@ -389,6 +408,7 @@ export function playCards(match, seat, cardIds, reason = "", preferredKey = null
     }
     if (
       allowAmbiguous &&
+      hasWildcard &&
       playable.length > 1 &&
       // The live seat controller decides; a cached bots array goes stale
       // when a player refreshes back into a seat the server gave to a bot.
@@ -403,7 +423,10 @@ export function playCards(match, seat, cardIds, reason = "", preferredKey = null
           .map((item) => comboOption(item))
       };
     }
-    combo = defaultReading(readings, match.current);
+    // 天然同花顺只按同花顺出；只有含逢人配时才需要玩家选择解读。
+    combo = hasWildcard
+      ? defaultReading(readings, match.current)
+      : playable.find((item) => item.type === TYPES.FLUSH_STRAIGHT) ?? defaultReading(readings, match.current);
   }
 
   if (!combo) return { ok: false, error: "这不是合法牌型" };
@@ -440,10 +463,10 @@ export function passTurn(match, seat, reason = "") {
   match.passes += 1;
 
   const remaining = [0, 1, 2, 3].filter((item) => match.hands[item].length > 0);
-  // A trick ends only after every player who still holds cards has passed.
-  // The old "remaining - 1" check cut the trick short once a player had gone
-  // out, so the last seat never got its chance to beat the play.
-  if (match.passes >= remaining.length && match.phase === "play") {
+  // 领出者不用再对自己的上一手点一次“不要”；只要其余在场玩家都过了，
+  // 就应立即清空本轮牌权，让领出者继续出牌。
+  const playersWhoMustPass = remaining.filter((item) => item !== match.leadSeat).length;
+  if (match.passes >= playersWhoMustPass && match.phase === "play") {
     const winner = match.leadSeat;
     match.current = null;
     match.passes = 0;

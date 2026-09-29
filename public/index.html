@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0c4a34" />
   <link rel="preload" as="image" href="/lobby-hero.jpg?v=7" />
   <title>掼蛋桌</title>
-  <link rel="stylesheet" href="/styles.css?v=14" />
+  <link rel="stylesheet" href="/styles.css?v=15" />
 </head>
 <body>
   <div id="lobby" class="lobby">
@@ -128,7 +128,10 @@
 
   <div id="comboChoice" class="combo-choice hidden" role="dialog" aria-modal="true" aria-label="选择牌型">
     <div class="combo-choice-card">
-      <p class="combo-choice-title">这手牌有两种打法，选一个</p>
+      <button type="button" id="comboChoiceClose" class="icon combo-choice-close" title="取消" aria-label="取消">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+      <p class="combo-choice-title">这手牌有逢人配，选一个打法</p>
       <div id="comboOptions" class="combo-options"></div>
     </div>
   </div>
@@ -146,6 +149,6 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=14"></script>
+  <script src="/app.js?v=15"></script>
 </body>
 </html>

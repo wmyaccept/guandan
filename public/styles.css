@@ -575,6 +575,11 @@ input {
   z-index: 8;
   pointer-events: none;
 }
+.hand .card.return-invalid {
+  cursor: not-allowed;
+  opacity: 0.42;
+  filter: grayscale(0.35);
+}
 .trick .card {
   width: calc(var(--trick-w) * var(--zoom));
   height: calc(var(--trick-h) * var(--zoom));
@@ -1242,6 +1247,7 @@ body { overscroll-behavior-y: none; }
   backdrop-filter: blur(3px);
 }
 .combo-choice-card {
+  position: relative;
   width: min(420px, 100%);
   padding: 16px;
   border: 1px solid rgba(227, 195, 111, 0.55);
@@ -1252,9 +1258,19 @@ body { overscroll-behavior-y: none; }
 }
 .combo-choice-title {
   margin: 0 0 12px;
+  padding: 0 36px;
   color: var(--gold);
   font-size: 15px;
   text-align: center;
+}
+.combo-choice-close {
+  position: absolute;
+  z-index: 1;
+  top: 7px;
+  right: 7px;
+  width: 32px;
+  min-width: 32px;
+  min-height: 32px;
 }
 .combo-options {
   display: grid;
