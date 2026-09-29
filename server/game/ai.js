@@ -305,7 +305,6 @@ export function controlCost(cards, levelRank) {
     const value = pointValue(card, levelRank);
     if (value >= 17) total += 3;
     else if (value === 16) total += 2;
-    else if (value === 15) total += 1;
   }
   return total;
 }
