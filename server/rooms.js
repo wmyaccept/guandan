@@ -12,7 +12,33 @@ const BOT_DELAY_MS = 2800;
 const TURN_LIMIT_MS = 60000;
 const ROOM_GRACE_MS = 10 * 60 * 1000;
 const GESTURE_COOLDOWN_MS = 1200;
-const GESTURES = new Set(["egg", "flower"]);
+const GESTURES = new Set(["egg", "flower", "tea"]);
+const CHAT_LIMIT = 40;
+const CHAT_COOLDOWN_MS = 2000;
+
+// Room-local, bounded, memory-only chat. Sender identity always comes from the seat.
+function addChat(io, room, { seat = null, text, kind = "system" }) {
+  const message = {
+    id: room.chatSeq = (room.chatSeq ?? 0) + 1,
+    seat, name: seat == null ? "小院" : room.seats[seat]?.name ?? "街坊",
+    bot: seat != null && Boolean(room.seats[seat]?.bot && !room.seats[seat]?.hosted),
+    kind, text
+  };
+  room.chat ??= [];
+  room.chat.push(message);
+  if (room.chat.length > CHAT_LIMIT) room.chat.shift();
+  toRoom(io, room, "chatMessage", { code: room.code, message });
+}
+
+function botGreeting(io, room, ending = false) {
+  const seat = room.seats.findIndex((item) => item?.bot && !item.hosted);
+  if (seat < 0) return;
+  const person = room.seats[seat];
+  const lines = ending
+    ? ["这一局收了，茶还热着。", "打得尽兴，再坐一局？", "歇口气，想玩咱们再来。"]
+    : ["茶续好了，人齐就开。", "来了，今天也好好配合！", "给大家留了位，慢慢玩。"];
+  addChat(io, room, { seat, kind: "bot", text: lines[person.personality ?? 0] });
+}
 
 function randomCode() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -55,7 +81,8 @@ function seatView(item) {
     name: item.name,
     bot: item.bot,
     hosted: Boolean(item.hosted),
-    connected: item.bot || Boolean(item.socketId)
+    connected: item.bot || Boolean(item.socketId),
+    personality: item.personality ?? null
   };
 }
 
@@ -69,7 +96,8 @@ function serializeRoom(room, socketId) {
     difficulty: normalizeDifficulty(room.difficulty),
     match: room.match ? publicState(room.match, seat >= 0 ? seat : null) : null,
     you: seat,
-    turnEndsAt: room.turnEndsAt ?? null
+    turnEndsAt: room.turnEndsAt ?? null,
+    chat: room.chat ?? []
   };
 }
 
@@ -149,8 +177,12 @@ function nextToken(room) {
 
 function scheduleAfterAction(io, room, delayMs = 0) {
   clearRoomTimers(room);
-  broadcast(io, room);
   const match = room.match;
+  if (match && ["roundOver", "matchOver"].includes(match.phase) && room.chatRound !== match.round) {
+    room.chatRound = match.round;
+    botGreeting(io, room, true);
+  }
+  broadcast(io, room);
   const seat = currentActor(match);
   if (seat == null) return;
   const token = nextToken(room);
@@ -198,6 +230,7 @@ export function attachSockets(io) {
       rooms.set(code, room);
       socketRoom.set(socket.id, code);
       socket.join(code);
+      addChat(io, room, { text: "小院的灯亮了，给朋友留个位子。" });
       broadcast(io, room);
     });
 
@@ -224,7 +257,8 @@ export function attachSockets(io) {
         socketId: socket.id,
         bot: false,
         hosted: false,
-        token: mine || prev?.token || null
+        token: mine || prev?.token || null,
+        chatAt: prev?.chatAt ?? null
       };
       // A refresh can reclaim a seat the server already handed to a bot. Keep
       // the match's live controller map in sync so the engine still treats the
@@ -233,6 +267,7 @@ export function attachSockets(io) {
       dropStaleSocket(io, prev, socket.id);
       socketRoom.set(socket.id, room.code);
       socket.join(room.code);
+      addChat(io, room, { text: `${room.seats[seat].name}${prev ? "回来了，原位还在。" : "到了，茶给你留着。"}` });
       broadcast(io, room);
       resumeIfIdle(io, room);
     });
@@ -252,7 +287,8 @@ export function attachSockets(io) {
         socketId: socket.id,
         bot: false,
         hosted: false,
-        token: room.seats[from].token || null
+        token: room.seats[from].token || null,
+        chatAt: room.seats[from].chatAt ?? null
       };
       room.seats[from] = null;
       syncBots(room);
@@ -300,14 +336,15 @@ export function attachSockets(io) {
     socket.on("fillBots", () => {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;
-      const botNames = ["\u963f\u5f3a", "\u5c0f\u5468", "\u8001\u674e"];
+      const botNames = ["老周", "小陈", "阿宁"];
       let n = 0;
       for (let i = 0; i < 4; i += 1) {
         if (!room.seats[i]) {
-          room.seats[i] = { name: botNames[n], socketId: null, bot: true };
+          room.seats[i] = { name: botNames[n], socketId: null, bot: true, personality: n };
           n += 1;
         }
       }
+      if (n) botGreeting(io, room);
       broadcast(io, room);
     });
 
@@ -315,6 +352,8 @@ export function attachSockets(io) {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;
       if (!filled(room)) return socket.emit("errorMessage", "\u6ee14\u4eba\u624d\u80fd\u5f00\u5c40\uff0c\u7a7a\u4f4d\u53ef\u4ee5\u52a0\u673a\u5668\u4eba");
+      if (room.match && room.match.phase !== "matchOver") return;
+      room.chatRound = null;
       room.match = createMatch(namesOf(room), { bots: botsOf(room), difficulty: room.difficulty });
       startRound(room.match);
       scheduleAfterAction(io, room, BOT_DELAY_MS);
@@ -359,7 +398,26 @@ export function attachSockets(io) {
       scheduleAfterAction(io, room, BOT_DELAY_MS);
     });
 
-    // Egg / flower thrown at another seat; everyone at the table sees it.
+    socket.on("chat", (payload) => {
+      const room = getRoom(socketRoom.get(socket.id));
+      if (!room) return;
+      const seat = room.seats.findIndex((item) => item?.socketId === socket.id);
+      if (seat < 0) return;
+      if (typeof payload?.text !== "string" || payload.text.length > 120) {
+        return socket.emit("chatError", "消息最多 120 个字符");
+      }
+      const text = payload.text.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").trim();
+      if (!text) return socket.emit("chatError", "先写点什么吧");
+      const person = room.seats[seat];
+      const now = Date.now();
+      if (person.chatAt != null && now - person.chatAt < CHAT_COOLDOWN_MS) {
+        return socket.emit("chatError", "慢一点，每两秒可以发一句");
+      }
+      person.chatAt = now;
+      addChat(io, room, { seat, text, kind: "player" });
+    });
+
+    // Seat gestures are room-scoped and rate-limited.
     socket.on("gesture", ({ seat, kind } = {}) => {
       const room = getRoom(socketRoom.get(socket.id));
       if (!room) return;

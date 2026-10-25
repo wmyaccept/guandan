@@ -97,19 +97,58 @@ try {
   await writeFile(path.join(dir, "lobby.png"), Buffer.from(lobbyShot.data, "base64"));
   await evaluate("document.getElementById('createBtn').click()");
   await until("state && state.code");
+  assert.equal(await evaluate("document.querySelectorAll('.empty-seat').length"), 3);
+  assert.equal(await evaluate("document.getElementById('gatheringNote').textContent.includes('还差 3 位')"), true);
+  await evaluate(`(async () => { globalThis.chatGuest = io(); await new Promise(resolve => chatGuest.on('connect', resolve));
+    chatGuest.emit('join', {code:state.code,name:'来喝茶的朋友'}); })()`);
+  await until("state.seats.filter(Boolean).length === 2");
+  await until("document.getElementById('chatLog').textContent.includes('来喝茶的朋友到了')");
+  await evaluate("document.querySelector('#quickChat button').click()");
+  await until("document.getElementById('chatLog').textContent.includes('谢谢配合')");
+  await evaluate("document.querySelectorAll('#quickChat button')[2].click()");
+  await until("document.getElementById('chatStatus').textContent.includes('两秒')");
+  await evaluate(`void chatGuest.emit('chat', {text:'<img src=x onerror="alert(1)">'});`);
+  await until("document.getElementById('chatLog').textContent.includes('<img')");
+  assert.equal(await evaluate("document.querySelectorAll('#chatLog img').length"), 0, 'chat must render as text');
+  await evaluate(`globalThis.originalClipboard = navigator.clipboard.writeText;
+    navigator.clipboard.writeText = async text => { globalThis.copiedInvite = text; };
+    document.getElementById('inviteBtn').click();`);
+  await until("globalThis.copiedInvite?.includes(state.code)");
+  await evaluate(`navigator.clipboard.writeText = async () => { throw Error('denied'); };
+    document.getElementById('inviteBtn').click();`);
+  await until("!document.getElementById('inviteFallback').classList.contains('hidden')");
+  assert.equal(await evaluate("document.getElementById('inviteFallback').value.includes(state.code)"), true);
+  await evaluate("navigator.clipboard.writeText = originalClipboard; document.getElementById('inviteFallback').classList.add('hidden')");
+  for (const width of [1440, 390]) {
+    await call('Emulation.setDeviceMetricsOverride', {width, height:900, deviceScaleFactor:1, mobile:false});
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+    const shot = await call('Page.captureScreenshot', {format:'png'});
+    await writeFile(path.join(dir, `courtyard-waiting-${width}.png`), Buffer.from(shot.data, 'base64'));
+  }
+  await evaluate("chatGuest.emit('leave'); void chatGuest.disconnect()");
+  await until("state.seats.filter(Boolean).length === 1");
   await evaluate("document.getElementById('botBtn').click()");
   await until("state.seats.every(Boolean)");
+  await until("document.querySelector('#chatLog .bot')");
+  await evaluate("document.getElementById('botTalk').click()");
+  assert.equal(await evaluate("document.querySelectorAll('#chatLog .bot').length"), 0);
+  await evaluate("document.getElementById('botTalk').click()");
+  assert.equal(await evaluate("document.querySelectorAll('#chatLog .bot').length > 0"), true);
+  console.log('PASS waiting / chat delivery / identity / XSS / cooldown / invite fallback / bot mute');
   await evaluate("document.getElementById('startBtn').click()");
   await until("state.match?.phase === 'play'");
   for (const width of [1920, 1440, 720, 390]) {
     await call("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
     await sleep(100);
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, `Table overflow ${width}`);
+    assert.equal(await evaluate("(() => { const board = document.querySelector('.board').getBoundingClientRect(); const banner = document.getElementById('banner').getBoundingClientRect(); return banner.bottom <= board.bottom && banner.top >= board.top; })()"), true, `Banner clipped ${width}`);
     await evaluate("document.getElementById('helpBtn').click()");
     assert.equal(await evaluate("document.getElementById('helpLiveNote').hidden"), false);
     await evaluate("document.getElementById('helpDone').click()");
     await until("!document.getElementById('helpDialog').open");
     await until("document.activeElement.id === 'helpBtn'");
+    const shot = await call('Page.captureScreenshot', {format:'png'});
+    await writeFile(path.join(dir, `courtyard-table-${width}.png`), Buffer.from(shot.data, 'base64'));
     console.log(`PASS table/help/live warning at ${width}px`);
   }
   // Isolate deterministic interaction fixtures from the real bot timer. These
@@ -179,15 +218,23 @@ try {
     await evaluate('handOwner = null; handPilesCustom = false; handPiles = []; pilesByOwner.clear(); renderHand(state.match)');
     console.log(`PASS stacking/pass/swipe/touch/drag at ${width}px`);
   }
-  await evaluate(`state.match.phase = 'roundOver'; state.match.roundResult = {levelRank:15, finishOrder:[0,2,1,3]};
+  await evaluate(`state.match.phase = 'roundOver'; state.match.roundResult = {levelRank:15, finishOrder:[0,2,1,3], notes:{plays:38,winds:2}};
     state.match.revealedHands = [{seat:1,cards:state.match.hand}, {seat:3,cards:state.match.hand.slice(0,2)}]; render(state);`);
   assert.equal(await evaluate("document.querySelectorAll('#remainingHands .card').length"), 6);
+  assert.equal(await evaluate("document.getElementById('roundNotes').textContent.includes('出牌 38 手')"), true);
   assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, 'reveal overflow');
   await evaluate("state.match.phase = 'matchOver'; render(state)");
   assert.equal(await evaluate("document.getElementById('remainingHands').classList.contains('hidden')"), false);
   await evaluate("state.match.phase = 'play'; state.match.revealedHands = []; render(state)");
   assert.equal(await evaluate("document.querySelectorAll('#remainingHands .card').length"), 0);
-  console.log('PASS settlement reveal / next-round cleanup');
+  assert.equal(await evaluate("document.getElementById('roundNotes').classList.contains('hidden')"), true);
+  for (const [width, height] of [[720,560], [390,640]]) {
+    await call('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+    assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
+    await evaluate("document.getElementById('chatPanel').open = false");
+    assert.equal(await evaluate("document.getElementById('chatForm').getBoundingClientRect().height === 0 || !document.getElementById('chatInput').checkVisibility()"), true);
+  }
+  console.log('PASS settlement reveal / brief notes / next-round cleanup / short viewport');
   assert.deepEqual(errors, [], "Browser uncaught exceptions");
   console.log("PASS all browser smoke checks");
   await call("Browser.close");

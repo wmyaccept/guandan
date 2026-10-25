@@ -5,22 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0c4a34" />
   <meta name="description" content="饭后无事，凑一桌。以市井烟火·百味人间为主题的四人联网掼蛋，和朋友共享一段闲暇时光。" />
-  <link rel="preload" as="image" href="/tea-table.svg?v=1" />
+  <link rel="preload" as="image" href="/courtyard.svg?v=1" />
   <title>掼蛋桌 · 饭后无事，凑一桌</title>
-  <link rel="stylesheet" href="/styles.css?v=17" />
+  <link rel="stylesheet" href="/styles.css?v=18" />
 </head>
 <body>
   <div id="lobby" class="lobby">
     <button type="button" id="lobbySettingsBtn" class="icon lobby-gear" title="外观设置" aria-label="外观设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <section class="lobby-scene">
-      <img class="lobby-hero" src="/tea-table.svg?v=1" alt="" draggable="false" />
+      <img class="lobby-hero" src="/courtyard.svg?v=1" alt="" draggable="false" />
       <div class="lobby-veil"></div>
       <div class="lobby-copy">
         <p class="kicker">市井烟火 · 百味人间</p>
         <h1>掼蛋</h1>
         <p class="lobby-invitation">饭后无事，凑一桌。</p>
         <p class="sub">四个人，两副牌，把闲暇留给彼此。</p>
-        <p class="lobby-story">烟火气，也在饭后围坐的一局牌里。<br />无论相隔多远，来坐，一起打一局。</p>
+        <p class="lobby-story">碗筷收好了，小院的灯还亮着。<br />茶续上，椅子拉开，给晚到的朋友留个位子。</p>
         <div class="lobby-links">
           <button type="button" id="lobbyHelpBtn" class="ghost" aria-haspopup="dialog" aria-controls="helpDialog">第一次来？看看怎么玩</button>
           <span>对家一队 · 从 2 打到 A</span>
@@ -95,6 +95,11 @@
       </div>
     </header>
 
+    <section class="courtyard-bar" aria-label="饭后小院">
+      <div><span class="scene-tag">饭后小院</span><span id="gatheringNote">茶还热着，等朋友到齐。</span></div>
+      <button type="button" id="inviteBtn" class="ghost">复制邀约</button>
+      <input id="inviteFallback" class="hidden" readonly aria-label="邀约内容，复制失败时可手动复制" />
+    </section>
     <section class="felt">
       <div class="board">
         <div id="counter" class="counter hidden">
@@ -104,7 +109,7 @@
         <div class="board-decor" aria-hidden="true">
           <span class="decor-ring"></span>
           <span class="decor-mark">掼蛋</span>
-          <span class="decor-caption">一桌闲暇 · 四人相伴</span>
+          <span class="decor-caption">饭后小院 · 茶暖人齐</span>
         </div>
         <article class="seat seat-top" data-view="2"></article>
         <article class="seat seat-left" data-view="3"></article>
@@ -116,6 +121,7 @@
           <div id="notice" class="notice hidden"></div>
         </div>
       </div>
+        <p id="roundNotes" class="round-notes hidden" role="status"></p>
         <section id="remainingHands" class="remaining-hands hidden" aria-label="本局剩余手牌"></section>
         <footer class="dock">
           <div class="hand-wrap">
@@ -134,6 +140,18 @@
         </footer>
     </section>
 
+    <details id="chatPanel" class="chat-panel" open>
+      <summary>桌边聊聊 <span id="chatCount"></span></summary>
+      <div class="chat-body">
+        <div class="chat-heading"><span>仅本桌可见 · 最近 40 条 · 不跨重启保存</span><label><input id="botTalk" type="checkbox" checked />机器人闲聊</label></div>
+        <div id="chatLog" class="chat-log" role="log" aria-label="本桌聊天" aria-live="polite" aria-relevant="additions"></div>
+        <div id="quickChat" class="quick-chat" aria-label="快捷用语">
+          <button type="button" class="ghost">谢谢配合</button><button type="button" class="ghost">打得漂亮</button><button type="button" class="ghost">快点出牌</button><button type="button" class="ghost">来了</button><button type="button" class="ghost">等我倒杯水</button><button type="button" class="ghost">再来一局</button>
+        </div>
+        <form id="chatForm" class="chat-form"><input id="chatInput" aria-label="聊天内容" maxlength="120" autocomplete="off" placeholder="说两句吧（最多120字）" /><button type="submit">发送</button></form>
+        <p id="chatStatus" class="chat-status" role="status"></p>
+      </div>
+    </details>
     <div id="fx" class="fx"></div>
     <div id="gestureLayer" class="gesture-layer" aria-hidden="true"></div>
     <div id="gesturePop" class="gesture-pop hidden" role="menu"></div>
@@ -203,6 +221,11 @@
         </ul>
       </details>
       <details class="help-details">
+        <summary>邀请朋友、聊天与小记</summary>
+        <p>牌桌上方可复制邀约；先让朋友加入，再补机器人。下方「桌边聊聊」支持文字和快捷用语，可折叠收起。每两秒可发一句，最多 120 个字符；仅本桌可见，最近 40 条临时保存在房间内，重启或房间清理后消失。请勿发送个人隐私。</p>
+        <p>「快点出牌」不会缩短计时，「等我倒杯水」不会暂停对局。机器人闲聊可单独关闭；点击其他玩家头像可添茶。结算小记只显示出牌手数、队友接风次数，不记录长篇复盘。</p>
+      </details>
+      <details class="help-details">
         <summary>这张牌桌与“市井烟火”</summary>
         <p>烟火气不仅在街巷摊铺，也在饭后围坐、朋友相聚的一局牌中。我们选取日常掼蛋牌桌作为切入点，用实时对局、对家协作和便捷开桌，把线下相聚的休闲场景延伸到网页，让身处不同地方的人也能共享一段轻松的闲暇时光。</p>
       </details>
@@ -212,6 +235,6 @@
   </dialog>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=18"></script>
+  <script src="/app.js?v=19"></script>
 </body>
 </html>

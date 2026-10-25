@@ -524,7 +524,10 @@ function avatarHtml(person, seat) {
     '" title="\u7838\u86cb / \u9001\u82b1">' + escapeHtml(avatarInitial(person.name)) + "</button>";
 }
 
+let seatedBefore = [];
+let seatedRoom = null;
 function renderSeats(room) {
+  if (seatedRoom !== room.code) { seatedBefore = []; seatedRoom = room.code; }
   const match = room.match;
   const waiting = !match;
   document.querySelectorAll(".seat").forEach((node) => {
@@ -539,17 +542,25 @@ function renderSeats(room) {
     if (person?.hosted) bits.push("\u6258\u7ba1\u4e2d");
     else if (person?.bot) bits.push("\u673a\u5668\u4eba");
     else if (person && !person.connected) bits.push("\u79bb\u7ebf");
+    if (person?.bot && !person.hosted && person.personality != null) bits.push(["沉稳", "爽快", "随和"][person.personality]);
     if (waiting && mine) bits.push("\u6211\u7684\u5ea7\u4f4d");
     if (pickable) bits.push("\u70b9\u51fb\u5165\u5ea7");
-    const remain = remainLabel(count);
+    const remain = match ? remainLabel(count) : "";
     if (remain) bits.push(remain);
     node.classList.toggle("turn", Boolean(match && match.turn === seat && (match.phase === "play" || match.phase === "returnTribute")));
     node.classList.toggle("me", mine);
     node.classList.toggle("pick", pickable);
-    node.innerHTML = avatarHtml(person, seat) +
-      '<div class="seat-text"><b>' + escapeHtml(person?.name ?? "\u7a7a\u4f4d") + "</b><span>" +
+    node.classList.toggle("empty-seat", !person);
+    if (person && !seatedBefore[seat]) {
+      node.classList.remove("seat-arrived");
+      void node.offsetWidth;
+      node.classList.add("seat-arrived");
+    }
+    node.innerHTML = (person ? avatarHtml(person, seat) : '<span class="empty-cup" aria-hidden="true">♨</span>') +
+      '<div class="seat-text"><b>' + escapeHtml(person?.name ?? "留个座") + "</b><span>" +
       (bits.join(" \u00b7 ") || " ") + "</span></div>";
   });
+  seatedBefore = room.seats.map(Boolean);
 }
 
 function renderSelf(room) {
@@ -558,7 +569,7 @@ function renderSelf(room) {
   const seat = you >= 0 ? you : 0;
   const person = room.seats[seat];
   const match = room.match;
-  const remain = remainLabel(match?.handsCount?.[seat] ?? 0);
+  const remain = match ? remainLabel(match.handsCount?.[seat] ?? 0) : "";
   const watch = spectatingNow ? spectateInfo(match) : null;
   const tag = watch ? '<span class="tag">正在看 ' + escapeHtml(watch.name ?? "队友") + " 的牌</span>" : "";
   el.innerHTML = "<b>" + escapeHtml(person?.name ?? "") + "</b>" + (remain ? "<span>" + remain + "</span>" : "") + tag;
@@ -925,6 +936,11 @@ function bindHandDrag() {
 
 /* ---------------- avatar gestures: throw an egg, send flowers ---------------- */
 const GESTURE_KINDS = {
+  tea: {
+    label: "添茶",
+    icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13v9q-6 5-13 0ZM17 10h3q4 6-3 5M7 5V2M12 5V2"/></svg>',
+    fly: '<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M8 13h23v20q-12 7-23 0Z" fill="#eee5cc"/><path d="M31 17h5q6 10-5 10M13 9V3M23 9V3" fill="none" stroke="#f2dca8" stroke-width="3"/></svg>'
+  },
   egg: {
     label: "\u7838\u86cb",
     icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="14" rx="7" ry="8.4"/><path d="M8 6.4 9.8 4l2 2.2L14 4l1.8 2.3"/></svg>',
@@ -948,6 +964,7 @@ function seatAnchor(seat) {
 }
 
 function burstHtml(kind) {
+  if (kind === "tea") return '<span class="tea-thanks">茶续上了 ♨</span>';
   const parts = [];
   const bits = kind === "flower" ? 10 : 8;
   const cls = kind === "flower" ? "petal" : "shard";
@@ -1341,6 +1358,8 @@ function pumpStates() {
 
 function render(room) {
   state = room;
+  syncChat(room);
+  renderGathering(room);
   you = room.you;
   pendingReconnect = false;
   if (room.you >= 0) saveSession(room.code, room.seats[room.you]?.name ?? "");
@@ -1375,6 +1394,11 @@ function render(room) {
   renderHand(match);
   renderCounter(match);
   renderRemainingHands(match);
+  const notes = match?.roundResult?.notes;
+  const settled = ["roundOver", "matchOver"].includes(match?.phase);
+  $("roundNotes").classList.toggle("hidden", !settled || !notes);
+  $("roundNotes").textContent = settled && notes
+    ? `这一桌小记 · 出牌 ${notes.plays} 手 · 队友接风 ${notes.winds} 次。茶还热着，想玩就再来一局。` : "";
   renderClock(room);
   renderDifficulty(room);
 }
@@ -1429,7 +1453,7 @@ function renderNotice(match) {
 
 function bannerText(room) {
   const match = room.match;
-  if (!match) return "\u70b9\u7a7a\u4f4d\u53ef\u6362\u5ea7 \u00b7 \u6ee14\u4eba\u540e\u5f00\u5c40";
+  if (!match) return room.seats.every(Boolean) ? "人齐了，开局吧。" : "给朋友留个位子 · 点空位可换座";
   if (match.phase === "matchOver") {
     if (you < 0) return (match.winnerTeam === 0 ? "\u7ea2\u961f" : "\u84dd\u961f") + " \u8fc7A\u80dc\u51fa";
     return match.winnerTeam === you % 2 ? "\u6211\u65b9\u8fc7A\u80dc\u51fa" : "\u5bf9\u5bb6\u8fc7A\u80dc\u51fa";
@@ -1449,6 +1473,14 @@ function resetToLobby(message) {
   displayed = null;
   state = null;
   you = -1;
+  chatRoom = null;
+  chatMessages = [];
+  chatRendered = "";
+  $("chatLog").replaceChildren();
+  $("chatCount").textContent = "";
+  $("chatInput").value = "";
+  $("chatStatus").textContent = "";
+  $("inviteFallback").classList.add("hidden");
   myTurnSeen = false;
   selected.clear();
   closeComboChoice();
@@ -1477,6 +1509,98 @@ function resetToLobby(message) {
   $("lobby").classList.remove("hidden");
   $("lobbyError").textContent = message || "";
 }
+
+/* ---------------- 小院：邀请与本桌聊天 ---------------- */
+let chatRoom = null;
+let chatMessages = [];
+let chatRendered = "";
+let botTalk = localStorage.getItem("guandan-bot-talk") !== "off";
+$("botTalk").checked = botTalk;
+
+function renderGathering(room) {
+  const count = room.seats.filter(Boolean).length;
+  $("gatheringNote").textContent = !room.match
+    ? (count < 4 ? `还差 ${4 - count} 位，椅子留好了。先邀朋友，再补机器人。` : "四位到齐，茶暖了，开局吧。")
+    : ["roundOver", "matchOver"].includes(room.match.phase) ? "这一局收了，坐坐再走。" : "灯下这一桌，慢慢打，好好配合。";
+  $("table").classList.toggle("waiting", !room.match);
+}
+
+function invitationText() {
+  return `饭后小院凑一桌，房间 ${state.code}，给你留了个位子。\n${location.origin}\n打开地址，填写昵称和房间号加入。（需能访问同一服务地址；localhost 仅本机可用）`;
+}
+$("inviteBtn").addEventListener("click", async () => {
+  if (!state) return;
+  const text = invitationText();
+  try {
+    await navigator.clipboard.writeText(text);
+    $("inviteFallback").classList.add("hidden");
+    toast("邀约已复制，发给朋友吧");
+  } catch {
+    const input = $("inviteFallback");
+    input.value = text;
+    input.classList.remove("hidden");
+    input.focus(); input.select();
+    toast("浏览器未允许复制，请手动复制邀约");
+  }
+});
+
+function syncChat(room) {
+  if (chatRoom !== room.code) {
+    chatRoom = room.code; chatMessages = []; chatRendered = "";
+    $("chatLog").replaceChildren(); $("chatInput").value = "";
+    $("chatStatus").textContent = "";
+  }
+  const merged = new Map(chatMessages.map((message) => [message.id, message]));
+  for (const message of room.chat ?? []) merged.set(message.id, message);
+  chatMessages = [...merged.values()].sort((a, b) => a.id - b.id).slice(-40);
+  renderChat();
+}
+function renderChat() {
+  const messages = chatMessages.filter((message) => botTalk || message.kind !== "bot");
+  const key = messages.map((message) => message.id).join(",");
+  if (key === chatRendered) return;
+  chatRendered = key;
+  const log = $("chatLog");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 32;
+  const ids = new Set(messages.map((message) => String(message.id)));
+  for (const node of [...log.children]) if (!ids.has(node.dataset.id)) node.remove();
+  // Preserve existing nodes so live regions do not reread the entire history on every turn.
+  for (const message of messages) {
+    if ([...log.children].some((node) => node.dataset.id === String(message.id))) continue;
+    const row = document.createElement("p");
+    row.dataset.id = String(message.id); row.className = "chat-line " + message.kind;
+    const name = document.createElement("b");
+    name.textContent = message.name + (message.bot ? "（机器人）" : "") + "：";
+    const text = document.createElement("span"); text.textContent = message.text;
+    row.append(name, text);
+    const next = [...log.children].find((node) => Number(node.dataset.id) > message.id);
+    log.insertBefore(row, next ?? null);
+  }
+  if (atBottom) log.scrollTop = log.scrollHeight;
+  $("chatCount").textContent = `${messages.length} 条`;
+}
+function sendChat(text) {
+  if (!socket.connected || !state) { $("chatStatus").textContent = "连接已断开，请回座后再发"; return; }
+  if (!text.trim()) return;
+  socket.emit("chat", { text });
+  $("chatStatus").textContent = "";
+}
+$("chatForm").addEventListener("submit", (event) => { event.preventDefault(); sendChat($("chatInput").value); });
+$("quickChat").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (button) sendChat(button.textContent);
+});
+$("botTalk").addEventListener("change", () => {
+  botTalk = $("botTalk").checked;
+  localStorage.setItem("guandan-bot-talk", botTalk ? "on" : "off");
+  chatRendered = "force"; renderChat();
+});
+socket.on("chatError", (message) => { $("chatStatus").textContent = message; });
+socket.on("chatMessage", ({ code, message }) => {
+  if (code !== state?.code) return;
+  syncChat({ code, chat: [message] });
+  if (message.kind === "player" && message.seat === you && message.text === $("chatInput").value.trim()) $("chatInput").value = "";
+});
 
 bindHandDrag();
 clockTimer = setInterval(() => {

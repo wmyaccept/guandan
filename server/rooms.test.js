@@ -359,4 +359,79 @@ test("点击头像可以砸蛋送花，非法目标和连点会被忽略", (t) =
   host.fire("gesture", { seat: 1, kind: "flower" });
   assert.equal(thrown(guest).length, 2, "冷却结束后可以再次互动");
   assert.equal(thrown(guest)[1].payload.kind, "flower");
+  mock.timers.tick(1300);
+  host.fire("gesture", { seat: 1, kind: "tea" });
+  assert.equal(thrown(guest)[2].payload.kind, "tea");
+});
+
+test("本桌聊天验证身份、长度、限频、房间隔离及回座历史", (t) => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1700000000000 });
+  t.after(() => mock.timers.reset());
+  const io = makeIo(); attachSockets(io);
+  const host = makeSocket(io, "chat-host"); io.connect(host);
+  host.fire("create", { name: "小明", token: "chat-host-token" });
+  const code = host.last("state").code;
+  const guest = makeSocket(io, "chat-guest"); io.connect(guest);
+  guest.fire("join", { name: "小红", code });
+  const outsider = makeSocket(io, "other-room"); io.connect(outsider);
+  outsider.fire("create", { name: "外桌" });
+  const count = (socket) => socket.events.filter((item) => item.event === "chatMessage").length;
+  const outsideCount = count(outsider);
+  host.fire("chat", { text: "谢谢配合", name: "伪装", seat: 1, kind: "system" });
+  assert.equal(guest.last("chatMessage").message.name, "小明");
+  assert.equal(guest.last("chatMessage").message.seat, 0);
+  assert.equal(guest.last("chatMessage").message.kind, "player");
+  assert.equal(count(outsider), outsideCount);
+  const received = count(guest);
+  host.fire("chat", { text: "快点出牌" });
+  assert.equal(count(guest), received);
+  assert.match(host.last("chatError"), /两秒/);
+  mock.timers.tick(2000);
+  for (const payload of [null, {}, { text: 3 }, { text: "x".repeat(121) }, { text: "\n\t " }]) host.fire("chat", payload);
+  assert.equal(count(guest), received);
+  const literal = '<img src=x onerror="alert(1)">';
+  host.fire("chat", { text: literal });
+  assert.equal(guest.last("chatMessage").message.text, literal, "HTML作为纯文本交给客户端显示");
+  for (let i = 0; i < 45; i += 1) { mock.timers.tick(2000); host.fire("chat", { text: `消息${i}` }); }
+  assert.equal(roomForTest(code).chat.length, 40);
+  host.fire("disconnect");
+  const back = makeSocket(io, "chat-back"); io.connect(back);
+  back.fire("join", { name: "小明", code, token: "chat-host-token" });
+  assert.equal(back.last("state").chat.length, 40);
+  assert.ok(back.last("state").chat.some((item) => item.text === "消息44"));
+  const afterJoin = count(guest);
+  back.fire("chat", { text: "回座也不能绕过限频" });
+  assert.equal(count(guest), afterJoin);
+  back.fire("leave");
+  mock.timers.tick(2000);
+  back.fire("chat", { text: "离桌不能发" });
+  assert.equal(count(guest), afterJoin);
+});
+
+test("机器人闲聊不读取手牌，补位和结算低频发言，开局不允许覆盖进行中对局", (t) => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  t.after(() => mock.timers.reset());
+  const io = makeIo(); attachSockets(io);
+  const host = makeSocket(io, "talk-host"); io.connect(host);
+  host.fire("create", { name: "小明" }); host.fire("fillBots");
+  const room = roomForTest(host.last("state").code);
+  assert.equal(room.chat.filter((item) => item.kind === "bot").length, 1);
+  host.fire("fillBots");
+  assert.equal(room.chat.filter((item) => item.kind === "bot").length, 1);
+  host.fire("start");
+  const match = room.match;
+  host.fire("start"); assert.equal(room.match, match);
+  match.phase = "play"; match.turn = 0; match.finishOrder = [2];
+  match.current = null;
+  match.hands = [
+    [{ id: "last", rank: 3, suit: "S", deck: 0 }],
+    [{ id: "other1", rank: 4, suit: "S", deck: 0 }], [],
+    [{ id: "other3", rank: 5, suit: "S", deck: 0 }]
+  ];
+  host.fire("play", { cardIds: ["last"] });
+  assert.equal(room.match.phase, "roundOver");
+  assert.equal(room.chat.filter((item) => item.kind === "bot").length, 2);
+  assert.equal(room.chat.at(-1).bot, true);
+  host.fire("pass");
+  assert.equal(room.chat.filter((item) => item.kind === "bot").length, 2);
 });

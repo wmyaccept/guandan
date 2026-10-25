@@ -216,6 +216,7 @@ export function startRound(match, rng = Math.random) {
   match.phase = "deal";
   match.finishOrder = [];
   match.roundResult = null;
+  match.roundNotes = { plays: 0, winds: 0 };
   match.tributePlan = [];
   match.returnsPlan = [];
   match.tributeRefused = [];
@@ -343,6 +344,7 @@ function endRound(match) {
   match.hands = match.hands.map((hand) => sortHand(hand, levelRank));
   match.roundResult = {
     levelRank: playedLevelRank,
+    notes: { ...(match.roundNotes ?? { plays: 0, winds: 0 }) },
     kind: result.kind,
     winTeam,
     loseTeam,
@@ -435,6 +437,8 @@ export function playCards(match, seat, cardIds, reason = "", preferredKey = null
   if (match.current && !canBeat(combo, match.current)) return { ok: false, error: "压不住上家" };
   if (!match.current && combo.cards.length === 0) return { ok: false, error: "必须出牌" };
 
+  match.roundNotes ??= { plays: 0, winds: 0 };
+  match.roundNotes.plays += 1;
   for (const id of cardIds) takeCard(hand, id);
   if (!Array.isArray(match.playedCards)) match.playedCards = [];
   for (const card of combo.cards) match.playedCards.push({ ...card });
@@ -476,6 +480,8 @@ export function passTurn(match, seat, reason = "") {
     if (match.hands[winner].length === 0) {
       const partner = partnerOf(winner);
       match.turn = match.hands[partner].length ? partner : nextSeatWithCards(match, winner);
+      match.roundNotes ??= { plays: 0, winds: 0 };
+      if (match.turn === partner) match.roundNotes.winds += 1;
       addLog(match, `${match.names[match.turn]} 接风`);
     } else {
       match.turn = winner;

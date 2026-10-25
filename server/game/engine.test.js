@@ -301,6 +301,7 @@ test("双下提前结束：同队包揽头二游就不再往下打", () => {
   assert.deepEqual(view.revealedHands.map(({ seat }) => seat), [1, 3]);
   assert.deepEqual(view.revealedHands.map(({ cards }) => cards.length), [1, 3]);
   assert.equal(view.roundResult.levelRank, 15, "亮牌保留本局级牌，不使用升级后的级牌");
+  assert.deepEqual(view.roundResult.notes, { plays: 2, winds: 0 }, "只记成功出牌，不计不要");
 });
 
 test("出完牌的玩家要等其余在场的人都不要后才接风", () => {
@@ -354,6 +355,11 @@ test("三家都不要之后才由出完牌一方的队友接风", () => {
   assert.equal(match.turn, (0 + 2) % 4);
   assert.equal(match.log.some((line) => line.includes("接风")), true);
   assert.equal(match.log.at(-1), "丙 接风");
+  assert.deepEqual(match.roundNotes, { plays: 1, winds: 1 });
+  assert.equal(playCards(match, 1, [match.hands[1][0].id]).ok, false);
+  assert.equal(match.roundNotes.plays, 1, "无效出牌不计入小记");
+  startRound(match, () => 0.5);
+  assert.deepEqual(match.roundNotes, { plays: 0, winds: 0 }, "新局重新计数");
 });
 
 test("记牌器只统计还没露面的牌", () => {
