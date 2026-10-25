@@ -297,6 +297,10 @@ test("双下提前结束：同队包揽头二游就不再往下打", () => {
   assert.equal(match.roundResult.steps, 3);
   assert.equal(match.hands[1].length, 1);
   assert.equal(match.hands[3].length, 3);
+  const view = publicState(match, 0);
+  assert.deepEqual(view.revealedHands.map(({ seat }) => seat), [1, 3]);
+  assert.deepEqual(view.revealedHands.map(({ cards }) => cards.length), [1, 3]);
+  assert.equal(view.roundResult.levelRank, 15, "亮牌保留本局级牌，不使用升级后的级牌");
 });
 
 test("出完牌的玩家要等其余在场的人都不要后才接风", () => {
@@ -362,6 +366,30 @@ test("记牌器只统计还没露面的牌", () => {
   assert.equal(view.remaining[17], 1);
   assert.equal(view.remaining[9], 7);
   assert.equal(view.remaining[5], 8);
+});
+
+test("普通结算及整场结束公开余牌，进行中与下一局不泄露暗牌", () => {
+  const match = createMatch(["甲", "乙", "丙", "丁"]);
+  match.round = 1;
+  match.phase = "play";
+  match.hands = [[], [], [tc("S", 8)], [tc("S", 4), tc("H", 9)]];
+  match.finishOrder = [0, 1];
+  match.turn = 2;
+  assert.deepEqual(publicState(match, 0).revealedHands, []);
+  assert.equal(playCards(match, 2, [match.hands[2][0].id]).ok, true);
+  assert.equal(match.phase, "roundOver");
+  for (const viewer of [0, 1, 2, 3, null]) {
+    const shown = publicState(match, viewer).revealedHands;
+    assert.deepEqual(shown.map(({ seat }) => seat), [3]);
+    assert.deepEqual(shown[0].cards.map((card) => card.rank), [4, 9]);
+    const originalId = shown[0].cards[0].id;
+    shown[0].cards[0].rank = 17;
+    assert.equal(match.hands[3].find((card) => card.id === originalId).rank, 4, "序列化不能返回可修改引擎的牌引用");
+  }
+  match.phase = "matchOver";
+  assert.equal(publicState(match, 0).revealedHands.length, 1);
+  startRound(match, () => 0.5);
+  assert.deepEqual(publicState(match, 0).revealedHands, []);
 });
 
 test("自己出完可以看队友的手牌", () => {

@@ -117,7 +117,7 @@ input {
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgba(10, 16, 12, 0.12) 0%, rgba(10, 12, 10, 0.16) 36%, rgba(12, 10, 8, 0.72) 100%),
+    linear-gradient(90deg, rgba(24, 18, 12, 0.88) 0%, rgba(24, 18, 12, 0.64) 36%, rgba(24, 18, 12, 0.08) 80%),
     radial-gradient(120% 70% at 50% 0%, transparent 40%, rgba(8, 6, 4, 0.28) 100%);
 }
 .lobby-copy {
@@ -431,6 +431,16 @@ input {
   min-height: 1.2em;
   text-shadow: 0 1px 8px #000;
 }
+.hand-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#swipeBtn { min-height: 30px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+#swipeBtn[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); }
+.hand.swipe-select .card { touch-action: none; cursor: crosshair; }
+.remaining-hands { flex: 0 0 auto; margin: 8px 14px; padding: 12px; background: rgba(12, 20, 16, 0.65); border: 1px solid var(--gold); border-radius: 8px; }
+.remaining-hands h3 { margin: 0 0 8px; font-size: 16px; }
+.remaining-hand + .remaining-hand { margin-top: 12px; }
+.remaining-hand p { margin: 0 0 6px; font-size: 13px; }
+.remaining-cards { display: flex; flex-wrap: wrap; gap: 5px; }
+.remaining-cards .card { --zoom: 0.65; pointer-events: none; }
 .self-status.turn b { color: var(--gold); }
 .self-status span { color: rgba(243, 238, 227, 0.82); font-size: 13px; }
 .hand {
@@ -446,7 +456,7 @@ input {
   width: max-content;
   min-width: 100%;
   overflow: visible;
-  padding: 8px 4px 2px;
+  padding: calc(var(--card-h) * 0.15) 4px 2px;
 }
 .pile {
   display: flex;
@@ -565,7 +575,8 @@ input {
   transform: translateY(calc(var(--card-h) * -0.13));
   outline: 3px solid var(--card-sel-ring);
   box-shadow: var(--card-sel-shadow);
-  z-index: 4;
+  /* Keep DOM stacking order: selecting an upper card must not cover the next. */
+  z-index: 1;
   background: var(--card-sel-bg);
 }
 .hand .card.dragging {
@@ -932,7 +943,7 @@ body { overscroll-behavior-y: none; }
   .trick { gap: 5px; }
   .banner { font-size: 14px; text-align: center; }
   .notice { font-size: 12px; padding: 5px 10px; max-width: 94vw; }
-  .hand { gap: 8px; padding: 6px 2px 2px; }
+  .hand { gap: 8px; padding: calc(var(--card-h) * 0.15) 2px 2px; }
   .play-actions { gap: 6px; }
   .play-actions button {
     flex: 1 1 0;
@@ -983,7 +994,7 @@ body { overscroll-behavior-y: none; }
 /* 触屏：允许左右滑动手牌区，纵向拖动仍然用于组牌 */
 @media (hover: none) and (pointer: coarse) {
   .hand .card { touch-action: pan-x; }
-  .hand .card.up { transform: translateY(calc(var(--card-h) * -0.1)) scale(1.02); }
+  .hand .card.up { transform: translateY(calc(var(--card-h) * -0.1)); }
 }
 
 /* ---------------- 头像与桌上互动 ---------------- */
@@ -1621,4 +1632,92 @@ body { overscroll-behavior-y: none; }
   .counter { width: 148px; }
   .counter-head { font-size: 11px; }
   .counter-cell { font-size: 9px; gap: 1px; }
+}
+
+/* ---------------- 饭后牌桌：生活场景与新手说明 ---------------- */
+.lobby-copy { padding-top: 76px; }
+.lobby-invitation {
+  margin: 22px 0 0;
+  color: #fff1d4;
+  font-size: clamp(23px, 3vw, 36px);
+  font-family: 'Songti SC', 'SimSun', serif;
+  letter-spacing: 0.08em;
+}
+.lobby-story { margin: 18px 0 0; color: #dfd0b7; line-height: 1.9; font-size: 14px; }
+.lobby-links { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 22px; }
+.lobby-links button { border-color: #a58a60; background: rgba(31, 25, 17, 0.62); border-radius: 6px; }
+.lobby-links span { color: #cfb994; font-size: 13px; }
+.entry-note { grid-column: 1 / -1; margin: 0; font-size: 13px; line-height: 1.7; color: #d2c7b2; }
+.table {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(234, 184, 108, 0.13), transparent 65%),
+    repeating-linear-gradient(0deg, rgba(218, 174, 107, 0.035) 0 1px, transparent 1px 7px),
+    #241d16;
+}
+.decor-caption {
+  position: absolute;
+  top: 66%;
+  color: rgba(227, 195, 111, 0.22);
+  font-size: 13px;
+  letter-spacing: 0.18em;
+}
+button:focus-visible, summary:focus-visible {
+  outline: 2px solid #f5d795;
+  outline-offset: 3px;
+}
+.help-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid #9e8051;
+  border-radius: 16px;
+  background: #f5eedf;
+  color: #352b20;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.5);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.help-dialog::backdrop { background: rgba(19, 15, 10, 0.75); }
+.help-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 28px;
+  background: #ece0c9;
+  border-bottom: 1px solid #cbb995;
+}
+.help-eyebrow { margin: 0 0 5px; color: #74603e; font-size: 12px; letter-spacing: 0.16em; }
+.help-head h2 { margin: 0; font-size: clamp(19px, 3vw, 25px); }
+.help-head button.ghost { flex-shrink: 0; color: #493923; border-color: #9c845f; border-radius: 6px; }
+.help-body { padding: 4px 28px 28px; font-size: 14px; line-height: 1.85; }
+.help-body p { margin: 12px 0; }
+.help-live-note { padding: 10px 14px; background: #f6dfb8; border-left: 3px solid #966121; color: #623d17; }
+.help-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 0; list-style: none; counter-reset: help-step; }
+.help-steps li { padding: 16px; border: 1px solid #d7c9ae; border-radius: 10px; background: #fffaf0; counter-increment: help-step; }
+.help-steps h3::before { content: "0" counter(help-step) " / "; color: #8a6b39; font-variant-numeric: tabular-nums; }
+.help-body h3 { margin: 0; font-size: 16px; }
+.help-steps p { margin-bottom: 0; }
+.help-wild { margin: 20px 0; padding: 18px; border-radius: 10px; background: #e3ebdd; border: 1px solid #bdcbb4; }
+.help-example strong { color: #6f3427; }
+.help-details { border-top: 1px solid #d4c5a8; padding: 12px 0; }
+.help-details summary { cursor: pointer; font-weight: 700; padding: 5px 0; }
+.help-details ul { padding-left: 22px; }
+.help-details li + li { margin-top: 8px; }
+.help-body .help-footnote { color: #73634b; font-size: 12px; }
+.help-done { width: 100%; border-radius: 6px; background: #315740; color: #fff7e6; }
+.help-dialog :focus-visible { outline-color: #76521d; }
+body:has(.help-dialog[open]) { overflow: hidden; }
+@media (max-width: 560px) {
+  .lobby-copy { padding-top: 64px; }
+  .lobby-invitation { margin-top: 16px; }
+  .lobby-links { margin-top: 16px; }
+  .lobby-story { margin-top: 12px; }
+  .help-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 10px; }
+  .help-head { padding: 16px; gap: 8px; }
+  .help-body { padding: 4px 16px 20px; }
+  .help-steps { grid-template-columns: 1fr; gap: 10px; }
 }

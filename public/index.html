@@ -4,20 +4,27 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0c4a34" />
-  <link rel="preload" as="image" href="/lobby-hero.jpg?v=7" />
-  <title>掼蛋桌</title>
-  <link rel="stylesheet" href="/styles.css?v=15" />
+  <meta name="description" content="饭后无事，凑一桌。以市井烟火·百味人间为主题的四人联网掼蛋，和朋友共享一段闲暇时光。" />
+  <link rel="preload" as="image" href="/tea-table.svg?v=1" />
+  <title>掼蛋桌 · 饭后无事，凑一桌</title>
+  <link rel="stylesheet" href="/styles.css?v=17" />
 </head>
 <body>
   <div id="lobby" class="lobby">
     <button type="button" id="lobbySettingsBtn" class="icon lobby-gear" title="外观设置" aria-label="外观设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <section class="lobby-scene">
-      <img class="lobby-hero" src="/lobby-hero.jpg?v=7" alt="" draggable="false" />
+      <img class="lobby-hero" src="/tea-table.svg?v=1" alt="" draggable="false" />
       <div class="lobby-veil"></div>
       <div class="lobby-copy">
-        <p class="kicker">四人两副牌</p>
+        <p class="kicker">市井烟火 · 百味人间</p>
         <h1>掼蛋</h1>
-        <p class="sub">对家一队。从 2 打到 A。</p>
+        <p class="lobby-invitation">饭后无事，凑一桌。</p>
+        <p class="sub">四个人，两副牌，把闲暇留给彼此。</p>
+        <p class="lobby-story">烟火气，也在饭后围坐的一局牌里。<br />无论相隔多远，来坐，一起打一局。</p>
+        <div class="lobby-links">
+          <button type="button" id="lobbyHelpBtn" class="ghost" aria-haspopup="dialog" aria-controls="helpDialog">第一次来？看看怎么玩</button>
+          <span>对家一队 · 从 2 打到 A</span>
+        </div>
       </div>
     </section>
     <form id="entry" class="entry">
@@ -39,7 +46,8 @@
           加入
         </button>
       </div>
-      <p id="lobbyError" class="error"></p>
+      <p class="entry-note">一个人也能开桌：补上机器人即可体验。和朋友玩时，把房间号告诉他们。</p>
+      <p id="lobbyError" class="error" role="status"></p>
     </form>
   </div>
 
@@ -51,6 +59,7 @@
         <span id="clock" class="clock hidden"></span>
       </div>
       <div class="top-actions">
+        <button type="button" id="helpBtn" class="ghost" aria-haspopup="dialog" aria-controls="helpDialog">怎么玩</button>
         <div class="tool-group">
           <button type="button" id="zoomOutBtn" class="icon" title="缩小" aria-label="缩小">
             <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -72,9 +81,9 @@
         <button type="button" id="settingsBtn" class="icon" title="外观设置" aria-label="外观设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
         <div id="diffGroup" class="seg-group" role="group" aria-label="机器人强度">
           <span class="seg-cap">人机</span>
-          <button type="button" class="seg" data-diff="easy" title="不看队友，乱用炸弹">简单</button>
-          <button type="button" class="seg" data-diff="medium" title="会算牌，但不顾队友">中等</button>
-          <button type="button" class="seg" data-diff="hard" title="配合队友，会拦牌">强力</button>
+          <button type="button" class="seg" data-diff="easy" title="会搭配手牌和保留炸弹，较少考虑队友">简单</button>
+          <button type="button" class="seg" data-diff="medium" title="配合队友，送牌和拦截，原强力策略">中等</button>
+          <button type="button" class="seg" data-diff="hard" title="整手配牌搜索，控牌收尾，协作拦截，合理用炸">强力</button>
         </div>
         <button type="button" id="botBtn">补机器人</button>
         <button type="button" id="startBtn">开局</button>
@@ -95,6 +104,7 @@
         <div class="board-decor" aria-hidden="true">
           <span class="decor-ring"></span>
           <span class="decor-mark">掼蛋</span>
+          <span class="decor-caption">一桌闲暇 · 四人相伴</span>
         </div>
         <article class="seat seat-top" data-view="2"></article>
         <article class="seat seat-left" data-view="3"></article>
@@ -106,9 +116,13 @@
           <div id="notice" class="notice hidden"></div>
         </div>
       </div>
+        <section id="remainingHands" class="remaining-hands hidden" aria-label="本局剩余手牌"></section>
         <footer class="dock">
           <div class="hand-wrap">
-            <div id="selfStatus" class="self-status"></div>
+            <div class="hand-tools">
+              <div id="selfStatus" class="self-status"></div>
+              <button type="button" id="swipeBtn" class="ghost" aria-pressed="false" title="开启后拖过手牌可连续选中；关闭后恢复拖动组牌">滑选：关</button>
+            </div>
             <div id="hand" class="hand"></div>
           </div>
           <div class="play-actions">
@@ -148,7 +162,56 @@
     </div>
   </div>
 
+  <dialog id="helpDialog" class="help-dialog" aria-labelledby="helpTitle" aria-describedby="helpIntro">
+    <div class="help-head">
+      <div><p class="help-eyebrow">来坐，慢慢学</p><h2 id="helpTitle">一桌掼蛋，怎么开始？</h2></div>
+      <button type="button" id="helpClose" class="ghost" aria-label="关闭玩法说明" autofocus>关闭</button>
+    </div>
+    <div class="help-body">
+      <p id="helpIntro">不用先背完规则。会开桌、会选牌，就可以从第一局慢慢熟悉。</p>
+      <p id="helpLiveNote" class="help-live-note" role="status" hidden>对局仍在继续，打开说明不会暂停计时；超时后系统会自动操作。</p>
+      <ol class="help-steps">
+        <li><h3>先凑一桌</h3><p>填写昵称，点「开新桌」；朋友填写房间号点「加入」。一个人体验时，房主点「补机器人」，再点「开局」。新手可在开局前选择「简单」人机。</p></li>
+        <li><h3>对面就是队友</h3><p>四人两副牌，每人 27 张。对面的玩家和你一队，两侧是对手。尽量和队友配合，先把手里的牌出完。</p></li>
+        <li><h3>选牌，再出牌</h3><p>轮到你时，点击手牌选中，再点「出牌」。跟牌要用同种、同张数且更大的牌型，炸弹可以压普通牌型。不想跟就点「不要」，但领出第一手时不能不要。</p></li>
+        <li><h3>不会出？点提示</h3><p>「提示」会帮你选牌，多点几次可轮换建议，仍需自己点「出牌」确认。「组牌」只整理手牌，不会替你出牌。打开手牌旁的「滑选」，可按住滑过多张牌；从已选牌起滑则连续取消选择。关闭滑选恢复拖动组牌，触屏可从手牌区空白处横向滚动。点「不要」会放下已选牌。</p></li>
+      </ol>
+      <section class="help-wild" aria-labelledby="wildHelpTitle">
+        <h3 id="wildHelpTitle">逢人配：红桃级牌，帮你补一张</h3>
+        <p>顶部会显示当前打几，那个点数的红桃就是逢人配。组牌时可当作 2 至 A 中任一点数的牌，也能补同花顺，但不能变成大小王；单独出时只算它自己。</p>
+        <p class="help-example">例如打 5 时：<strong>♠8 + ♥5 → 一对 8</strong>。桌面上的「配」标记会注明它代表的点数。</p>
+        <p>同一手牌有多种可出的解释时，会弹窗让你选择打法；只有一种可出解释时直接按该解释出牌。</p>
+      </section>
+      <details class="help-details">
+        <summary>常见牌型与大小</summary>
+        <ul>
+          <li>单张、对子、三张、三带二；三带二比较三张的点数，带的一对可以是真正的一对王。</li>
+          <li>顺子恰好 5 张；木板恰好三连对（如 334455）；钢板恰好两组三张（如 333444）。同花顺是同花色的 5 张顺子。</li>
+          <li>A 可放低端或高端：A2345 最小，10JQKA 最大；23456 合法，JQKA2 不合法。连牌中的级牌按原点数排，大小王不参与。</li>
+          <li>非连牌：大王 &gt; 小王 &gt; 级牌 &gt; A 至 3（去掉级牌）&gt; 普通 2。同点数不按花色分大小。</li>
+          <li>炸弹顺序：4 张炸 &lt; 5 张炸 &lt; 同花顺 &lt; 6 张炸 &lt; 更多张炸 &lt; 天王炸（四张王）。同长度炸弹按点数比。</li>
+        </ul>
+      </details>
+      <details class="help-details">
+        <summary>升级、进还贡与接风</summary>
+        <ul>
+          <li>先出完的是头游。头游与队友拿前两名（双下）升 3 级，拿一、三名升 2 级，拿一、四名升 1 级。已到 A 的队伍拿到双下或头三才过 A 获胜。</li>
+          <li>下一局双下由三游、末游各进一贡，大贡给头游；其余情况末游给头游进贡，即使两人是队友也要进贡。逢人配不作为贡牌。</li>
+          <li>进贡方合计持有两张大王即可抗贡。还贡优先选非级牌的 2 至 10；没有时才允许其他非级牌。</li>
+          <li>进贡后由进大贡者先出；抗贡时由上一局头游先出。首局由系统按座位顺序找到的第一位持红桃 3 者先出。</li>
+          <li>某人出完最后一手后，要等其余有牌玩家都不要，才由仍有牌的队友接风；不是一出完就接风。</li>
+        </ul>
+      </details>
+      <details class="help-details">
+        <summary>这张牌桌与“市井烟火”</summary>
+        <p>烟火气不仅在街巷摊铺，也在饭后围坐、朋友相聚的一局牌中。我们选取日常掼蛋牌桌作为切入点，用实时对局、对家协作和便捷开桌，把线下相聚的休闲场景延伸到网页，让身处不同地方的人也能共享一段轻松的闲暇时光。</p>
+      </details>
+      <p class="help-footnote">各地掼蛋规则略有差异，本说明以本站实现为准。随时可从首页或牌桌的「怎么玩」重新查看。</p>
+      <button type="button" id="helpDone" class="help-done">知道了，回到牌桌</button>
+    </div>
+  </dialog>
+
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=15"></script>
+  <script src="/app.js?v=18"></script>
 </body>
 </html>

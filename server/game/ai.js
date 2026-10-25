@@ -1,5 +1,6 @@
 import { isHeartLevel, pointValue, rankAtPosition, rankValue } from "./cards.js";
-import { TYPES, bombPower, comboKey, comboLabel, parseCombos } from "./combos.js";
+import { TYPES, bombPower, canBeat, comboKey, comboLabel, parseCombos } from "./combos.js";
+import { createPlanner, controlEstimate, unknownWilds } from "./ai-planner.js";
 import { generatePlays } from "./moves.js";
 
 export const DIFFICULTIES = ["easy", "medium", "hard"];
@@ -44,16 +45,10 @@ const W = {
   finishBias: 3
 };
 
-// Three genuinely different decision styles rather than one difficulty knob:
-//   easy   - naive; no hand planning, beats its own partner, wastes bombs
-//   medium - plans structure and keeps bombs, but plays selfishly and noisily
-//   hard   - full logic: partner care, stop plays, endgame feeding
+// easy = former medium; medium = former hard. Hard adds bounded whole-hand
+// planning and public-information endgame tactics; it never reads other hands.
 const PROFILE = {
   easy: {
-    planner: "naive",
-    noise: 0
-  },
-  medium: {
     planner: "structure",
     noise: 3.4,
     partnerAware: false,
@@ -62,7 +57,7 @@ const PROFILE = {
     topKind: false,
     bombLead: 34
   },
-  hard: {
+  medium: {
     planner: "structure",
     noise: 0,
     partnerAware: true,
@@ -70,11 +65,10 @@ const PROFILE = {
     feedPartner: true,
     topKind: true,
     bombLead: W.bombLead
-  }
+  },
+  hard: { planner: "search", noise: 0, partnerAware: true, stopAware: true,
+    feedPartner: true, topKind: true, bombLead: W.bombLead }
 };
-
-const NAIVE_BASE = { groups: [], tricks: 0, powerTotal: 0, bombWeight: 0, score: 0 };
-const NO_STRUCT = { tricks: 0, bombLoss: 0 };
 
 export function normalizeDifficulty(value) {
   return DIFFICULTIES.includes(value) ? value : "hard";
@@ -345,17 +339,18 @@ function buildContext(match, seat, levelRank, profile) {
   const alive = [0, 1, 2, 3].filter((index) => handsCount[index] > 0);
   const current = match.current ?? null;
   const winnerSeat = current ? match.lastPlay?.seat ?? match.leadSeat : null;
-  const naive = profile.planner === "naive";
-  // The naive tier never reads hand structure, so skip the costly decomposition.
-  const base = naive ? NAIVE_BASE : decompose(hand, levelRank);
-  const candidates = dedupe(generatePlays(hand, levelRank, current), levelRank).map((combo) => ({
+  const planner = profile.planner === "search" ? createPlanner(hand, levelRank, decompose) : null;
+  const base = planner ? planner.plan() : decompose(hand, levelRank);
+  const candidates = (planner ? planner.candidates.filter((c) => canBeat(c, current))
+    : dedupe(generatePlays(hand, levelRank, current), levelRank)).map((combo) => ({
     c: combo,
     bp: effectiveBombPower(combo, levelRank),
-    st: naive ? NO_STRUCT : structureOfCards(hand, combo.cards, base, levelRank)
+    st: planner ? null : structureOfCards(hand, combo.cards, base, levelRank)
   }));
   const winnerCount = winnerSeat == null ? 0 : handsCount[winnerSeat];
   const partnerIsHead = match.finishOrder[0] === partner;
-  const lastToAct = Boolean(current) && match.passes + 1 >= alive.length;
+  const requiredPasses = profile.planner === "search" ? alive.filter((index) => index !== winnerSeat).length : alive.length;
+  const lastToAct = Boolean(current) && match.passes + 1 >= requiredPasses;
   const stopNeeded =
     Boolean(current) &&
     profile.stopAware &&
@@ -379,7 +374,8 @@ function buildContext(match, seat, levelRank, profile) {
     partnerCount: handsCount[partner],
     lastToAct,
     stopNeeded,
-    partnerIsHead
+    partnerIsHead,
+    planner
   };
 }
 
@@ -489,50 +485,137 @@ function follow(ctx, order) {
   return { action: "pass", reason: "压不住", order };
 }
 
-// Casual-player logic for the easy tier: no decomposition and no partner care.
-// It plays the cheapest legal thing, overbeats its own partner, burns bombs on
-// tricks that are not worth it, and sometimes simply cannot be bothered to win.
-function easyDecide(ctx, rng) {
-  const { levelRank, current, myCount } = ctx;
-  const options = ctx.candidates.map((entry) => entry.c);
-  if (!options.length) return { action: "pass", reason: "压不住", order: [] };
-  // 简单档也会乱炸，但不会把同花顺拆成顺子白送
-  const bpOf = new Map(ctx.candidates.map((entry) => [entry.c, entry.bp]));
-  const pow = (combo) => bpOf.get(combo) ?? bombPower(combo);
+function hardOrder(ctx) {
+  const { hand, levelRank, planner, base, current, unseen } = ctx;
+  const opponents = [1, 3].map((offset) => ctx.handsCount[(ctx.seat + offset) % 4]).filter(Boolean);
+  const enemyMin = opponents.length ? Math.min(...opponents) : Infinity;
+  const wilds = unknownWilds(ctx.match, ctx.seat, levelRank);
+  const baseBombs = base.groups.filter((g) => bombPower(g));
+  const controlCache = new Map();
+  const estimate = (group) => {
+    const key = [group.type, group.rank, group.length].join(":");
+    if (!controlCache.has(key)) controlCache.set(key, controlEstimate(group, unseen, opponents, levelRank, wilds));
+    return controlCache.get(key);
+  };
+  // A hand of weak leftovers needs entries (controls) to regain the lead.
+  // Spending the final entry repeatedly is not progress just because it stops
+  // a short opponent. Count this debt as well as the number of remaining plays.
+  const entryDebt = (plan) => Math.max(0, plan.groups.reduce((sum, group) => {
+    const strength = estimate(group);
+    return sum + (strength >= 0.75 ? -1 : 1 - strength);
+  }, 0) - 1);
+  const beforeDebt = entryDebt(base);
+  return ctx.candidates.map((item) => {
+    const { c, bp } = item;
+    const after = planner.after(c.cards);
+    const ids = new Set(cardIds(c));
+    const brokenBombs = baseBombs.filter((g) => g.cards.some((card) => ids.has(card.id)) &&
+      !g.cards.every((card) => ids.has(card.id))).length;
+    const control = estimate(c);
+    const debt = entryDebt(after);
+    const debtIncrease = Math.max(0, debt - beforeDebt);
+    const extra = Math.max(0, after.tricks + 1 - base.tricks);
+    // Total remaining cover matters more than immediate card count. A bomb is
+    // a resource, not sacred: spend it to recover tempo for a short finish.
+    let score = -28 * after.score + 2 * c.length - 0.85 * rankValue(c.rank, levelRank);
+    score -= 16 * brokenBombs + 3 * wildsUsed(c.cards, levelRank);
+    score -= 1.5 * controlCost(c.cards, levelRank);
+    score -= 10 * debt + 16 * debtIncrease;
+    if (bp) score -= after.tricks <= 1 ? 8 : 40;
+    if (after.tricks <= 1) score += 55 * control;
+    if (enemyMin <= 2) {
+      score += (current ? 32 : 12) * control;
+      if (!current && c.type === TYPES.SINGLE && enemyMin === 1) score -= 45 * (1 - control);
+      if (!current && c.type === TYPES.PAIR && enemyMin === 2) score -= 18 * (1 - control);
+    }
+    // Prefer a cheap feed, but do not dismantle a bomb or feed the enemy's
+    // last card. Two remaining partner cards are not necessarily a pair.
+    if (!current && ctx.partnerCount > 0 && ctx.partnerCount <= 2 && enemyMin > 2 &&
+        !bp && !brokenBombs && extra === 0 && c.length === ctx.partnerCount) {
+      score += 22 - rankValue(c.rank, levelRank);
+    }
+    return { item: { ...item, after, control, debtIncrease, brokenBombs, st: { tricks: extra, bombLoss: brokenBombs } }, score };
+  }).sort((a, b) => b.score - a.score || a.item.bp - b.item.bp ||
+    rankValue(a.item.c.rank, levelRank) - rankValue(b.item.c.rank, levelRank));
+}
 
-  const cheap = options
-    .slice()
-    .sort(
-      (a, b) =>
-        rankValue(a.rank, levelRank) - rankValue(b.rank, levelRank) ||
-        a.length - b.length ||
-        pow(a) - pow(b)
-    );
+function hardDecide(ctx) {
+  const order = hardOrder(ctx);
+  const pass = (reason) => ({ action: "pass", reason, order });
+  const play = (entry, reason) => playDecision(entry.item.c, reason, order);
+  if (!order.length) return pass("压不住");
+  const finish = order.find(({ item }) => item.c.length === ctx.myCount);
+  if (finish) return play(finish, "一把走完");
+  const best = order[0];
+  if (!ctx.current) return play(best, best.item.after.tricks === 1 && best.item.control >= 0.8
+    ? "先控牌，再争取走完" : "按整手配牌领出");
 
-  const goingOut = cheap.find((combo) => combo.length === myCount);
-  if (goingOut) return playDecision(goingOut, "一把走完", []);
-
-  if (!current) {
-    // Jitter among the three cheapest plain cards so it is not a fixed script.
-    const plain = cheap.filter((combo) => !pow(combo) && combo.length <= 2);
-    const pool = (plain.length ? plain : cheap).slice(0, 3);
-    const pick = pool[Math.floor(rng() * pool.length) % pool.length];
-    return playDecision(pick, "领出" + comboLabel(pick), []);
+  if (ctx.winnerSeat === ctx.partner) {
+    // A partner already out will pass the lead back to us (接风). Do not burn
+    // controls to win a trick our team already owns. Otherwise overtake only
+    // with a very strong two-trick exit, or to guard an enemy's last single.
+    if (!ctx.partnerCount) return pass("让队友接风");
+    const exit = order.find(({ item }) => item.after.tricks === 1 && item.control >= 0.98 && !item.brokenBombs);
+    if (exit && ctx.partnerCount > 2) return play(exit, "接手控牌，争取自己先走");
+    const enemySingle = [1, 3].some((offset) => ctx.handsCount[(ctx.seat + offset) % 4] === 1);
+    const enemies = [1, 3].map((offset) => ctx.handsCount[(ctx.seat + offset) % 4]);
+    const partnerControl = controlEstimate(ctx.current, ctx.unseen, enemies, ctx.levelRank,
+      unknownWilds(ctx.match, ctx.seat, ctx.levelRank));
+    const guard = order.find(({ item }) => !item.bp && !item.brokenBombs && item.control > partnerControl + 0.4);
+    if (enemySingle && ctx.current.type === TYPES.SINGLE && guard &&
+        (guard.item.after.tricks <= 1 || guard.item.debtIncrease < 0.6))
+      return play(guard, "保护队友，封住单张");
+    return pass("让队友走牌");
   }
 
-  const winners = cheap.filter((combo) => !pow(combo));
-  const bombs = cheap.filter((combo) => pow(combo));
-  if (winners.length) {
-    if (rng() < 0.18) return { action: "pass", reason: "先不要", order: [] };
-    return playDecision(winners[0], "压上家", []);
+  const enemyHead = ctx.match.finishOrder.length > 0 && ctx.match.finishOrder[0] % 2 !== ctx.seat % 2;
+  // Someone who has already finished cannot be stopped. Overtaking that last
+  // trick may deny their partner a lead, but is not automatically an emergency.
+  const urgent = ctx.winnerCount > 0 && (ctx.winnerCount <= 2 || (enemyHead && ctx.winnerCount <= 6));
+  const terminalRisk = enemyHead && ctx.winnerCount > 0 && ctx.winnerCount <= 2;
+  const exhaustedEntry = ({ item }) => item.after.tricks > 1 && item.debtIncrease >= 0.6;
+  const plains = order.filter(({ item }) => !item.bp);
+  if (plains.length) {
+    const cheap = plains.find(({ item }) => !item.brokenBombs && item.st.tricks <= 1);
+    if (urgent) {
+      // Blocking is a means, not the objective: retain structure and future
+      // entries. Only impending enemy double-finish justifies desperate breaks.
+      const safe = plains.filter(({ item }) => !item.brokenBombs && item.st.tricks <= 1);
+      const pool = terminalRisk ? plains : safe;
+      const controlWeight = terminalRisk ? 120 : 18;
+      const block = pool.slice().sort((a, b) =>
+        (b.score + controlWeight * b.item.control) - (a.score + controlWeight * a.item.control))[0];
+      if (block && (terminalRisk || !exhaustedEntry(block)))
+        return play(block, "兼顾余牌结构，拦截对手");
+      if (block && !ctx.lastToAct) return pass("不耗尽控制牌，交给队友接应");
+    }
+    if (cheap) {
+      const expensive = controlCost(cheap.item.c.cards, ctx.levelRank) >= 2;
+      if (!terminalRisk && exhaustedEntry(cheap)) return pass("保留回手大牌，避免只剩小牌");
+      if (expensive && cheap.item.after.tricks > 1 && !urgent && !ctx.lastToAct && rankValue(ctx.current.rank, ctx.levelRank) <= 10)
+        return pass("保留大牌，先看队友");
+      return play(cheap, "顺手出牌，保留配牌结构");
+    }
   }
-  if (bombs.length && rng() < 0.5) return playDecision(bombs[0], "炸弹拦下", []);
-  return { action: "pass", reason: "压不住", order: [] };
+  const bombs = order.filter(({ item }) => item.bp && !item.brokenBombs);
+  if (bombs.length) {
+    const finishSetup = bombs.find(({ item }) => item.after.tricks <= 1);
+    const shortOpponent = ctx.winnerCount > 0 && ctx.winnerCount <= 6;
+    const worthwhile = urgent || (shortOpponent && ctx.base.tricks <= 3) || bombPower(ctx.current) ||
+      (ctx.current.length >= 5 && rankValue(ctx.current.rank, ctx.levelRank) >= 10);
+    if (finishSetup && ctx.myCount <= 8) return play(finishSetup, "用炸弹争先，准备收尾");
+    if (worthwhile) {
+      const usable = bombs.filter((entry) => terminalRisk || !exhaustedEntry(entry));
+      usable.sort((a, b) => a.item.bp - b.item.bp || b.score - a.score);
+      if (usable.length) return play(usable[0], "用足够的炸弹拦截，保留回手能力");
+    }
+  }
+  return pass("不拆牌，留住控制牌");
 }
 
 function decide(ctx, rng = Math.random) {
   if (!ctx.hand.length) return { action: "pass", reason: "没有牌", order: [] };
-  if (ctx.profile.planner === "naive") return easyDecide(ctx, rng);
+  if (ctx.planner) return hardDecide(ctx);
   const order = rankOrder(ctx, rng);
   const goingOut = order.find(({ item }) => item.c.length === ctx.myCount);
   if (goingOut) return playDecision(goingOut.item.c, "一把走完", order);
@@ -571,8 +654,13 @@ export function suggestPlays(match, seat, levelRank) {
 
 export function chooseReturnCard(hand, allowed, levelRank, difficulty = "hard", rng = Math.random) {
   if (!allowed.length) return null;
-  // The easy tier hands back whatever is nearest instead of its worst card.
-  if (normalizeDifficulty(difficulty) === "easy") return allowed[Math.floor(rng() * allowed.length) % allowed.length];
+  if (normalizeDifficulty(difficulty) === "hard") {
+    const planner = createPlanner(hand, levelRank, decompose);
+    planner.plan();
+    return allowed.map((card) => ({ card, score: planner.after([card]).score }))
+      .sort((a, b) => a.score - b.score || pointValue(a.card, levelRank) - pointValue(b.card, levelRank))[0].card;
+  }
+  // Both lower tiers retain the former medium/hard return-card policy.
   const counts = Object.create(null);
   for (const card of hand) counts[card.rank] = (counts[card.rank] ?? 0) + 1;
   return allowed

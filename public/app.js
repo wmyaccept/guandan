@@ -9,6 +9,8 @@ let handOwner = null;
 const pilesByOwner = new Map();
 let spectateOn = false;
 let spectatingNow = false;
+let swipeSelect = false;
+let cancelHandGesture = () => {};
 let displayed = null;
 let stateQueue = [];
 let lastRevealAt = 0;
@@ -723,6 +725,7 @@ function renderCounter(match) {
 
 function renderHand(match) {
   const hand = $("hand");
+  cancelHandGesture();
   hand.innerHTML = "";
   if (!match) {
     handPiles = [];
@@ -826,8 +829,41 @@ function bindHandDrag() {
   const hand = $("hand");
   let drag = null;
 
+  const reset = (restore = false) => {
+    if (!drag) return;
+    const current = drag;
+    drag = null;
+    if (restore && current.swipe) {
+      selected.clear();
+      for (const id of current.before) selected.add(id);
+      hand.querySelectorAll(".card").forEach((node) => node.classList.toggle("up", selected.has(node.dataset.id)));
+    }
+    current.node.classList.remove("dragging");
+    if (hand.hasPointerCapture(current.pointerId)) hand.releasePointerCapture(current.pointerId);
+    clearDropTargets();
+  };
+  cancelHandGesture = () => reset(true);
+
+  const sweep = (x, y) => {
+    if (!drag?.swipe) return;
+    // Snapshot hit regions before selection moves cards; retain only exposed
+    // areas so crossing one card does not select the hidden cards behind it.
+    const steps = Math.max(1, Math.ceil(Math.hypot(x - drag.x, y - drag.y) / 4));
+    for (let i = 1; i <= steps; i += 1) {
+      const px = drag.x + (x - drag.x) * i / steps;
+      const py = drag.y + (y - drag.y) * i / steps;
+      const hit = drag.regions.findLast(({ box }) => px >= box.left && px <= box.right && py >= box.top && py <= box.bottom);
+      if (!hit || drag.visited.has(hit.node.dataset.id)) continue;
+      const id = hit.node.dataset.id;
+      drag.visited.add(id);
+      if (selected.has(id) !== drag.select) toggleSelect(id, hit.node);
+    }
+    drag.x = x;
+    drag.y = y;
+  };
+
   hand.addEventListener("pointerdown", (event) => {
-    if (spectatingNow) return;
+    if (spectatingNow || !["play", "returnTribute"].includes(state?.match?.phase) || drag) return;
     const node = event.target.closest(".card");
     if (!node || event.button !== 0) return;
     drag = {
@@ -836,13 +872,25 @@ function bindHandDrag() {
       startX: event.clientX,
       startY: event.clientY,
       moved: false,
-      pointerId: event.pointerId
+      pointerId: event.pointerId,
+      swipe: swipeSelect,
+      before: new Set(selected),
+      select: !selected.has(node.dataset.id),
+      visited: new Set(),
+      x: event.clientX,
+      y: event.clientY,
+      regions: [...hand.querySelectorAll(".card")].map((node) => ({ node, box: node.getBoundingClientRect() }))
     };
-    node.setPointerCapture(event.pointerId);
+    hand.setPointerCapture(event.pointerId);
+    if (drag.swipe) sweep(event.clientX, event.clientY);
   });
 
   hand.addEventListener("pointermove", (event) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (drag.swipe) {
+      sweep(event.clientX, event.clientY);
+      return;
+    }
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
     if (!drag.moved && Math.hypot(dx, dy) < 8) return;
@@ -859,10 +907,9 @@ function bindHandDrag() {
   const finish = (event, cancelled) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const current = drag;
-    drag = null;
-    current.node.classList.remove("dragging");
-    clearDropTargets();
-    if (cancelled) return;
+    if (!cancelled && current.swipe) sweep(event.clientX, event.clientY);
+    reset(cancelled);
+    if (cancelled || current.swipe) return;
     if (current.moved) {
       applyDrop(current.id, locateDrop(event.clientX, event.clientY, current.id));
       if (state) renderHand(state.match);
@@ -873,6 +920,7 @@ function bindHandDrag() {
 
   hand.addEventListener("pointerup", (event) => finish(event, false));
   hand.addEventListener("pointercancel", (event) => finish(event, true));
+  hand.addEventListener("lostpointercapture", () => reset(true));
 }
 
 /* ---------------- avatar gestures: throw an egg, send flowers ---------------- */
@@ -1073,28 +1121,16 @@ function posRank(position) {
   return position;
 }
 
-function sortRun(combo, cards, levelRank) {
+function sortRun(combo, cards, represented) {
   const len = runLength(combo);
-  const copies = combo.type === "tripleseq" ? 3 : combo.type === "pairseq" ? 2 : 1;
-  const top = combo.rank;
-  const isWild = (card) => card.suit === "H" && card.rank === levelRank;
-  const naturals = cards.filter((card) => !isWild(card));
-  const wilds = cards.filter(isWild);
-  const slot = new Map();
-  let wildAt = 0;
+  const start = combo.start || combo.rank - len + 1;
+  const positions = new Map();
   for (let offset = 0; offset < len; offset += 1) {
-    const rank = posRank(top - len + 1 + offset);
-    const here = naturals.filter((card) => card.rank === rank);
-    for (const card of here) slot.set(card.id, offset);
-    for (let copy = here.length; copy < copies; copy += 1) {
-      const wild = wilds[wildAt];
-      if (!wild) break;
-      slot.set(wild.id, offset + 0.5);
-      wildAt += 1;
-    }
+    positions.set(posRank(start + offset), offset);
   }
-  for (const card of cards) if (!slot.has(card.id)) slot.set(card.id, len + 1);
-  return cards.slice().sort((a, b) => slot.get(a.id) - slot.get(b.id) || String(a.suit).localeCompare(String(b.suit)));
+  const slot = (card) => (positions.get(represented.get(card.id) ?? card.rank) ?? len + 1) +
+    (represented.has(card.id) ? 0.5 : 0);
+  return cards.slice().sort((a, b) => slot(a) - slot(b) || String(a.suit).localeCompare(String(b.suit)));
 }
 
 function wildRepresentations(combo, cards, levelRank) {
@@ -1152,24 +1188,25 @@ function wildRepresentations(combo, cards, levelRank) {
       const rank = posRank(start + offset);
       for (let copy = 0; copy < copies; copy += 1) slots.push(rank);
     }
-    const used = new Set();
-    for (const rank of slots) {
-      const natural = cards.find((card) => !used.has(card.id) && !isWild(card) && card.rank === rank);
-      if (natural) used.add(natural.id);
+    // Consume occupied slots before assigning wilds; repeated ranks each
+    // occupy one slot (pairs/triples), not every slot with that rank.
+    const missing = slots.slice();
+    for (const card of cards) {
+      if (isWild(card)) continue;
+      const index = missing.indexOf(card.rank);
+      if (index >= 0) missing.splice(index, 1);
     }
-    for (const rank of slots) {
-      const exactWild = wilds.find((card) => !used.has(card.id) && card.rank === rank);
-      if (!exactWild) continue;
-      used.add(exactWild.id);
-      mark(exactWild, rank);
+    for (const card of wilds) {
+      const index = missing.indexOf(card.rank);
+      if (index < 0) continue;
+      mark(card, card.rank);
+      missing.splice(index, 1);
     }
-    for (const rank of slots) {
-      const wild = wilds.find((card) => !used.has(card.id));
-      if (!wild) break;
-      used.add(wild.id);
-      mark(wild, rank);
+    for (const card of wilds) {
+      if (reps.has(card.id)) continue;
+      const rank = missing.shift();
+      if (rank != null) mark(card, rank);
     }
-    for (const card of wilds) if (!reps.has(card.id)) mark(card, combo.rank);
     return reps;
   }
 
@@ -1177,17 +1214,15 @@ function wildRepresentations(combo, cards, levelRank) {
   return reps;
 }
 
-function sortComboCards(combo, levelRank) {
+function sortComboCards(combo, levelRank, represented = wildRepresentations(combo, combo.cards ?? [], levelRank)) {
   const cards = combo.cards ?? [];
   if (["straight", "pairseq", "tripleseq", "flushstraight"].includes(combo.type)) {
-    return sortRun(combo, cards, levelRank);
+    return sortRun(combo, cards, represented);
   }
   const byValue = (a, b) => comboValue(a, levelRank) - comboValue(b, levelRank) ||
     String(a.suit).localeCompare(String(b.suit));
   if (combo.type === "fullhouse") {
-    const same = cards.filter((card) => card.rank === combo.rank);
-    const wilds = cards.filter((card) => card.suit === "H" && card.rank === levelRank && card.rank !== combo.rank);
-    const triple = (same.length >= 3 ? same : [...same, ...wilds]).slice(0, 3);
+    const triple = cards.filter((card) => (represented.get(card.id) ?? card.rank) === combo.rank);
     const rest = cards.filter((card) => !triple.includes(card));
     return [...triple.sort(byValue), ...rest.sort(byValue)];
   }
@@ -1214,8 +1249,8 @@ function renderTrick(match) {
   trick.className = "trick fx-" + combo.type;
   trick.innerHTML = "";
   const group = FX_GROUP[combo.type] ?? 1;
-  const cards = sortComboCards(combo, match.levelRank);
-  const represented = wildRepresentations(combo, cards, match.levelRank);
+  const represented = wildRepresentations(combo, combo.cards ?? [], match.levelRank);
+  const cards = sortComboCards(combo, match.levelRank, represented);
   cards.forEach((card, index) => {
     const node = renderCard(card, match.levelRank, represented.get(card.id));
     node.style.setProperty("--i", String(index));
@@ -1339,8 +1374,32 @@ function render(room) {
   for (const id of [...selected]) if (!ids.has(id)) selected.delete(id);
   renderHand(match);
   renderCounter(match);
+  renderRemainingHands(match);
   renderClock(room);
   renderDifficulty(room);
+}
+
+function renderRemainingHands(match) {
+  const panel = $("remainingHands");
+  panel.replaceChildren();
+  const hands = ["roundOver", "matchOver"].includes(match?.phase) ? match.revealedHands ?? [] : [];
+  panel.classList.toggle("hidden", !hands.length);
+  if (!hands.length) return;
+  const title = document.createElement("h3");
+  title.textContent = "本局结束 · 剩余手牌亮牌";
+  panel.append(title);
+  for (const { seat, cards } of hands) {
+    const row = document.createElement("div");
+    row.className = "remaining-hand";
+    const label = document.createElement("p");
+    const place = match.roundResult?.finishOrder.indexOf(seat) ?? -1;
+    label.textContent = `${match.names[seat]} · ${["头游", "二游", "三游", "末游"][place] ?? ""} · 剩 ${cards.length} 张`;
+    const strip = document.createElement("div");
+    strip.className = "remaining-cards";
+    for (const card of cards) strip.append(renderCard(card, match.roundResult?.levelRank ?? match.levelRank));
+    row.append(label, strip);
+    panel.append(row);
+  }
 }
 
 function renderNotice(match) {
@@ -1422,6 +1481,7 @@ function resetToLobby(message) {
 bindHandDrag();
 clockTimer = setInterval(() => {
   if (state) renderClock(state);
+  if ($("helpDialog").open) updateHelpStatus();
 }, 250);
 
 function currentName() {
@@ -1493,10 +1553,64 @@ $("playBtn").addEventListener("click", () => {
   if (state?.match?.phase === "returnTribute") socket.emit("returnTribute", { cardId: cardIds[0] });
   else socket.emit("play", { cardIds });
 });
-$("passBtn").addEventListener("click", () => socket.emit("pass"));
+$("passBtn").addEventListener("click", () => {
+  cancelHandGesture();
+  selected.clear();
+  if (state) renderHand(state.match);
+  socket.emit("pass");
+});
+$("swipeBtn").addEventListener("click", () => {
+  cancelHandGesture();
+  swipeSelect = !swipeSelect;
+  $("swipeBtn").textContent = swipeSelect ? "滑选：开" : "滑选：关";
+  $("swipeBtn").setAttribute("aria-pressed", String(swipeSelect));
+  $("hand").classList.toggle("swipe-select", swipeSelect);
+});
 $("groupBtn").addEventListener("click", groupSelected);
 $("hintBtn").addEventListener("click", () => socket.emit("hint"));
 $("comboChoiceClose").addEventListener("click", closeComboChoice);
+
+/* ---------------- beginner guide (native modal keeps focus inside) ---------------- */
+let helpOpener = null;
+
+function openHelp(event) {
+  const dialog = $("helpDialog");
+  if (dialog.open) return;
+  closeSettings();
+  closeGesturePop();
+  helpOpener = event?.currentTarget ?? document.activeElement;
+  updateHelpStatus();
+  $("helpDone").textContent = state ? "知道了，回到牌桌" : "知道了，去开一桌";
+  dialog.showModal();
+  dialog.scrollTop = 0;
+}
+
+function updateHelpStatus() {
+  const phase = state?.match?.phase;
+  $("helpLiveNote").hidden = phase !== "play" && phase !== "returnTribute";
+}
+
+function closeHelp() {
+  $("helpDialog").close();
+}
+
+$("lobbyHelpBtn").addEventListener("click", openHelp);
+$("helpBtn").addEventListener("click", openHelp);
+$("helpClose").addEventListener("click", closeHelp);
+$("helpDone").addEventListener("click", closeHelp);
+$("helpDialog").addEventListener("close", () => {
+  // A reconnect may switch from lobby to table while the guide is open.
+  const fallback = state ? $("helpBtn") : $("lobbyHelpBtn");
+  const target = helpOpener?.getClientRects().length ? helpOpener : fallback;
+  target.focus();
+  helpOpener = null;
+});
+$("helpDialog").addEventListener("click", (event) => {
+  if (event.target !== $("helpDialog")) return;
+  const rect = event.currentTarget.getBoundingClientRect();
+  if (event.clientX < rect.left || event.clientX > rect.right ||
+      event.clientY < rect.top || event.clientY > rect.bottom) closeHelp();
+});
 
 /* ---------------- appearance panel and bot strength ---------------- */
 const DIFF_LEVELS = ["easy", "medium", "hard"];
@@ -1568,6 +1682,7 @@ $("lobbySettingsBtn").addEventListener("click", openSettings);
 $("settingsClose").addEventListener("click", closeSettings);
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
+  if ($("helpDialog").open) return; // Native Escape closes only the top modal.
   closeSettings();
   closeGesturePop();
   closeComboChoice();

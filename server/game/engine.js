@@ -319,6 +319,7 @@ function finishSeat(match, seat) {
 }
 
 function endRound(match) {
+  const playedLevelRank = levelRankOf(match);
   const result = upgradeFor(match.finishOrder);
   const winTeam = teamOf(match.finishOrder[0]);
   const loseTeam = 1 - winTeam;
@@ -341,6 +342,7 @@ function endRound(match) {
   const levelRank = levelRankOf(match);
   match.hands = match.hands.map((hand) => sortHand(hand, levelRank));
   match.roundResult = {
+    levelRank: playedLevelRank,
     kind: result.kind,
     winTeam,
     loseTeam,
@@ -531,6 +533,12 @@ export function publicState(match, viewerSeat = null) {
     spectate: spectatorView(match, viewerSeat),
     remaining: remainingCounts(match, viewerSeat),
     roundResult: match.roundResult,
+    // Reveal only after settlement, including both losing hands on a double
+    // finish. Sort/mark with the level actually played, not the next round's.
+    revealedHands: ["roundOver", "matchOver"].includes(match.phase)
+      ? match.hands.flatMap((hand, seat) => hand.length
+        ? [{ seat, cards: cloneCards(sortHand(hand, match.roundResult?.levelRank ?? levelRank)) }] : [])
+      : [],
     winnerTeam: match.winnerTeam,
     log: match.log.slice(-12),
     viewerSeat

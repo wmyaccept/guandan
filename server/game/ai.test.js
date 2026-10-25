@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { makeCard } from "./cards.js";
-import { parseCombo, TYPES } from "./combos.js";
-import { chooseAction, decompose, isTopOfKind, suggestPlays, unseenCounts } from "./ai.js";
+import { canBeat, comboKey, parseCombo, parseCombos, TYPES } from "./combos.js";
+import { chooseAction, chooseReturnCard, decompose, isTopOfKind, suggestPlays, unseenCounts } from "./ai.js";
+import { createPlanner } from "./ai-planner.js";
 import { autoAct, createMatch, startRound } from "./engine.js";
 
 const RANK_MAP = { J: 11, Q: 12, K: 13, A: 14 };
@@ -223,7 +224,8 @@ test("简单档不看队友，照压不误", () => {
       winner: 2
     });
   assert.equal(chooseAction(build(), 0, 15, "hard").action, "pass");
-  assert.equal(chooseAction(build(), 0, 15, "medium", rng(5)).action, "play");
+  assert.equal(chooseAction(build(), 0, 15, "medium", rng(5)).action, "pass");
+  assert.equal(chooseAction(build(), 0, 15, "easy", rng(5)).action, "play");
   let plays = 0;
   for (let seed = 1; seed <= 24; seed += 1) {
     if (chooseAction(build(), 0, 15, "easy", rng(seed)).action === "play") plays += 1;
@@ -231,7 +233,7 @@ test("简单档不看队友，照压不误", () => {
   assert.ok(plays >= 15, "简单档应该经常压队友的牌，实际 " + plays + "/24");
 });
 
-test("简单档会浪费炸弹，中等和强力留着", () => {
+test("升级后的简单档也会保留炸弹，不再随机乱炸", () => {
   const current = parseCombo(makeHand("SA", "HA"), 15);
   const hand = makeHand("S9", "H9", "D9", "C9", "S3", "D4", "C5", "S6", "H7", "D8", "C10", "SJ");
   const build = () =>
@@ -242,21 +244,17 @@ test("简单档会浪费炸弹，中等和强力留着", () => {
   for (let seed = 1; seed <= 20; seed += 1) {
     if (chooseAction(build(), 0, 15, "easy", rng(seed)).action === "play") bombs += 1;
   }
-  assert.ok(bombs >= 5, "简单档应该经常乱炸，实际 " + bombs + "/20");
+  assert.equal(bombs, 0, "原中等策略下移后，简单档不该乱炸");
 });
 
-test("简单档领出只会挑最小的单张或对子", () => {
-  const hand = makeHand("S3", "S6", "SA", "H9", "D12", "C13");
+test("简单档继承原中等的长牌配牌能力，中等继承送队友能力", () => {
+  const hand = makeHand("S3", "H4", "D5", "C6", "S7", "H9", "DQ", "CK");
   const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)], turn: 0 });
   for (let seed = 1; seed <= 12; seed += 1) {
-    const decision = chooseAction(match, 0, 15, "easy", rng(seed));
-    assert.equal(decision.action, "play");
-    assert.equal(decision.cardIds.length, 1);
-    assert.ok(
-      ["0-S-3", "0-S-6", "0-H-9"].includes(decision.cardIds[0]),
-      "简单档应该出最小的几张，实际 " + decision.cardIds[0]
-    );
+    assert.equal(chooseAction(match, 0, 15, "easy", rng(seed)).cardIds.length, 5);
   }
+  match.hands[2] = makeHand("SA");
+  assert.deepEqual(chooseAction(match, 0, 15, "medium").cardIds, ["0-S-3"]);
 });
 
 test("非法难度按强力处理", () => {
@@ -310,6 +308,122 @@ test("同一桌混着打，强力队拿头游的次数多于简单队", () => {
     else easyHead += 1;
   }
   assert.ok(hardHead > easyHead, "强力队头游 " + hardHead + " 次，简单队 " + easyHead + " 次");
+});
+
+test("强力配牌搜索优于固定先组炸弹，并保持每张牌唯一且牌型合法", () => {
+  const hand = makeHand("C4", "H12", "C7", "D5", "C15", "C12", "H8", "S4", "S13", "D6", "S14", "D4", "C13", "H15");
+  const planner = createPlanner(hand, 15, decompose);
+  const plan = planner.plan();
+  assert.ok(plan.tricks < decompose(hand, 15).tricks);
+  assert.equal(plan.tricks, 4);
+  assert.deepEqual(plan.groups.flatMap((g) => g.cards.map((c) => c.id)).sort(), hand.map((c) => c.id).sort());
+  assert.ok(plan.groups.every((g) => parseCombos(g.cards, 15).some((c) => c.type === g.type)));
+  assert.ok(planner.nodes <= 2400);
+  const fallback = createPlanner(hand, 15, decompose, 0).plan();
+  assert.deepEqual(fallback.groups.flatMap((g) => g.cards.map((c) => c.id)).sort(), hand.map((c) => c.id).sort());
+});
+
+test("中等与强力均保留先出顶张控牌再走顺子的能力", () => {
+  const hand = makeHand("S3", "H4", "D5", "C6", "S7", "J17");
+  const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)] });
+  assert.deepEqual(chooseAction(match, 0, 15, "hard").cardIds, ["0-J-17"]);
+  assert.deepEqual(chooseAction(match, 0, 15, "medium").cardIds, ["0-J-17"]);
+});
+
+test("强力可以接过队友小牌组织两手收尾，但队友已出完则保留接风", () => {
+  const hand = makeHand("S3", "H4", "D5", "C6", "S7", "J17");
+  const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("S8"), 15), winner: 2 });
+  assert.deepEqual(chooseAction(match, 0, 15).cardIds, ["0-J-17"]);
+  assert.equal(chooseAction(match, 0, 15, "medium").action, "pass");
+  match.hands[2] = [];
+  match.finishOrder = [2];
+  assert.equal(chooseAction(match, 0, 15).action, "pass");
+});
+
+test("对手报单不等于必须耗尽大牌：有多手弱余牌时先顺走小牌", () => {
+  const match = table({ hands: [makeHand("S6", "SA", "J17", "C9"), makeHand("S7"), filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("S5"), 15), winner: 1 });
+  const action = chooseAction(match, 0, 15);
+  assert.equal(action.action, "play");
+  assert.deepEqual(action.cardIds, ["0-S-6"]);
+});
+
+test("敌方已获头游且队友报单时，优先阻止双下而不是省大牌", () => {
+  const match = table({ hands: [makeHand("S6", "SA", "J17", "C9"), makeHand("S7"), filler(12, 20), []],
+    current: parseCombo(makeHand("S5"), 15), winner: 1, finishOrder: [3] });
+  assert.deepEqual(chooseAction(match, 0, 15).cardIds, ["0-J-17"]);
+});
+
+test("对手剩五张不盲顶唯一回手大王，避免留下多手小牌", () => {
+  const match = table({ hands: [makeHand("S3", "D6", "C9", "J17"), filler(5, 4), filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("SA"), 15), winner: 1 });
+  assert.equal(chooseAction(match, 0, 15).action, "pass");
+  match.passes = 2;
+  assert.equal(chooseAction(match, 0, 15).action, "pass", "最后跟牌也不能机械耗尽回手牌");
+});
+
+test("对手已出完的最后一手不被误判为必须拦截", () => {
+  const match = table({ hands: [makeHand("S3", "D6", "C9", "J17"), [], filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("SA"), 15), winner: 1, finishOrder: [1] });
+  assert.equal(chooseAction(match, 0, 15).action, "pass");
+});
+
+test("能拿牌权两手走完仍应使用大王，不因保控制牌而错过收尾", () => {
+  const match = table({ hands: [makeHand("S3", "H4", "D5", "C6", "S7", "J17"), filler(5, 4), filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("SA"), 15), winner: 1 });
+  assert.deepEqual(chooseAction(match, 0, 15).cardIds, ["0-J-17"]);
+});
+
+test("队友报单但敌人也报单时不盲送小单张", () => {
+  const hand = makeHand("S3", "H4", "D5", "C6", "S7", "SA");
+  const match = table({ hands: [hand, makeHand("J17"), makeHand("S8"), filler(12, 32)] });
+  assert.equal(chooseAction(match, 0, 15).cardIds.length, 5);
+  assert.deepEqual(chooseAction(match, 0, 15, "medium").cardIds, ["0-S-3"]);
+});
+
+test("强力会用炸弹拿出牌权收尾，而不是永远囤炸", () => {
+  const hand = makeHand("S4", "H4", "D4", "C4", "S3", "H3");
+  const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("SA", "HA", "DA"), 15), winner: 1 });
+  const action = chooseAction(match, 0, 15);
+  assert.equal(action.cardIds.length, 4);
+  assert.ok(action.cardIds.every((id) => id.endsWith("-4")));
+});
+
+test("强力还贡保留完整顺子，不仅按孤张点数选择", () => {
+  const hand = makeHand("S3", "H4", "D5", "C6", "S7", "D9");
+  assert.equal(chooseReturnCard(hand, hand, 15, "hard").rank, 9);
+  assert.equal(chooseReturnCard(hand, hand, 15, "medium").rank, 3);
+  assert.equal(chooseReturnCard(hand, hand, 15, "easy").rank, 3);
+});
+
+test("强力不读取其他玩家的暗牌，同张数换牌不改变决策", () => {
+  const hand = makeHand("S3", "H4", "D5", "C6", "S7", "J17");
+  const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)] });
+  const before = chooseAction(match, 0, 15);
+  for (const seat of [1, 2, 3]) {
+    match.hands[seat] = new Proxy(Array(12), { get(target, key) {
+      assert.equal(key, "length", "读取了对手/队友的暗牌");
+      return target.length;
+    } });
+  }
+  const after = chooseAction(match, 0, 15);
+  assert.deepEqual(after.cardIds, before.cardIds);
+  assert.equal(after.comboKey, before.comboKey);
+});
+
+test("强力候选保留不同实牌组合及炸弹，提示全部可以合法执行", () => {
+  const hand = makeHand("S3", "H3", "D3", "C3", "S4", "H4", "S5", "H5", "S6", "H6", "S7", "H15", "H15");
+  const match = table({ hands: [hand, filler(12, 4), filler(12, 20), filler(12, 32)],
+    current: parseCombo(makeHand("S8", "H8"), 15), winner: 1 });
+  for (const action of suggestPlays(match, 0, 15)) {
+    if (action.action === "pass") continue;
+    assert.equal(new Set(action.cardIds).size, action.cardIds.length);
+    const cards = action.cardIds.map((id) => hand.find((c) => c.id === id));
+    assert.ok(cards.every(Boolean));
+    assert.ok(parseCombos(cards, 15).some((c) => comboKey(c) === action.comboKey && canBeat(c, match.current)));
+  }
 });
 
 test("拆牌认得 A 当小和 2 打头的连牌", () => {
