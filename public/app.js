@@ -402,7 +402,7 @@ function toast(text) {
 function cardClass(card, levelRank) {
   const classes = ["card"];
   if (card.suit === "H" || card.suit === "D") classes.push("red");
-  if (card.rank >= 16) classes.push("joker");
+  if (card.rank >= 16) classes.push("joker", card.rank === 17 ? "joker-big" : "joker-small");
   if (card.suit === "H" && card.rank === levelRank) classes.push("wild");
   return classes.join(" ");
 }
@@ -413,6 +413,15 @@ function renderCard(card, levelRank, representedRank = null) {
   div.className = cardClass(card, levelRank);
   div.dataset.id = card.id;
   const rank = RANK[card.rank];
+  if (card.rank >= 16) {
+    div.setAttribute("aria-label", rank);
+    div.title = rank;
+    div.innerHTML = '<span class="joker-index" aria-hidden="true">JOKER</span>' +
+      '<img class="joker-art" src="/joker.svg?v=1" alt="" draggable="false" />' +
+      '<span class="joker-index joker-index-bottom" aria-hidden="true">JOKER</span>' +
+      '<span class="joker-caption" aria-hidden="true">' + rank + '</span>';
+    return div;
+  }
   const suit = SUIT[card.suit] ?? "";
   const wild = card.suit === "H" && card.rank === levelRank;
   const wildLabel = representedRank == null

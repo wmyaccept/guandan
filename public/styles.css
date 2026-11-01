@@ -524,9 +524,20 @@ input {
   pointer-events: none;
 }
 .card.red { color: var(--card-red); }
-.card.joker { background: var(--card-joker-bg); color: var(--card-joker-ink); }
-.card.joker .pip { font-size: 1.3em; opacity: 0.3; }
-.card.joker .corner strong { font-size: 0.74em; }
+/* Jokers use a printed paper face in every skin, not the old gold king tile. */
+.card.joker { background: linear-gradient(#fffcf5, #f0e9d9); color: #b73546; }
+.card.joker-small { color: #55565a; }
+.card .joker-index {
+  position: absolute; top: .34em; left: .32em;
+  writing-mode: vertical-rl; text-orientation: upright;
+  font: 700 .47em/1 Georgia, 'Times New Roman', serif;
+  letter-spacing: .02em; z-index: 1; pointer-events: none;
+}
+.card .joker-index-bottom { top: auto; left: auto; right: .32em; bottom: .34em; transform: rotate(180deg); }
+.card .joker-art { position: absolute; width: 79%; height: 77%; left: 12%; top: 13%; object-fit: contain; pointer-events: none; }
+.card.joker-small .joker-art { filter: grayscale(1); }
+.card .joker-caption { position: absolute; bottom: .4em; left: 50%; transform: translateX(-50%); font-size: .42em; font-weight: 700; letter-spacing: .08em; white-space: nowrap; pointer-events: none; }
+.hand .card.joker.up { background: linear-gradient(#fffdf6, #f7e7b4); }
 .card.wild {
   outline: 3px solid var(--card-wild-ring);
   background: var(--card-wild-bg);

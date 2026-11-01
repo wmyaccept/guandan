@@ -235,6 +235,35 @@ try {
     assert.equal(await evaluate("document.getElementById('chatForm').getBoundingClientRect().height === 0 || !document.getElementById('chatInput').checkVisibility()"), true);
   }
   console.log('PASS settlement reveal / brief notes / next-round cleanup / short viewport');
+  // Shared Joker renderer: color distinction survives skins, small cards and selection.
+  await call('Emulation.setDeviceMetricsOverride', {width:1000,height:760,deviceScaleFactor:1,mobile:false});
+  await evaluate(`(() => {
+    const preview = document.createElement('div'); preview.id = 'jokerPreview';
+    preview.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#302c26;padding:28px;display:flex;gap:24px;flex-wrap:wrap;align-content:start;overflow:auto';
+    for (const skin of ['classic','pearl','kraft','ink','jade']) {
+      const group = document.createElement('section'); group.dataset.cardSkin = skin;
+      group.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;width:280px';
+      const title = document.createElement('p'); title.textContent = skin; title.style.width = '100%'; group.append(title);
+      for (const rank of [16,17]) {
+        const card = renderCard({id:'joker-'+skin+'-'+rank,rank,suit:'J'},15);
+        card.style.setProperty('--zoom','1.25'); group.append(card);
+      }
+      const small = renderCard({id:'small-'+skin,rank:16,suit:'J'},15);
+      small.style.setProperty('--zoom','.65'); group.append(small); preview.append(group);
+    }
+    document.body.append(preview);
+  })()`);
+  await until("[...document.querySelectorAll('#jokerPreview img')].every(img => img.complete && img.naturalWidth > 0)");
+  assert.equal(await evaluate("[...document.querySelectorAll('#jokerPreview .joker-small .joker-art')].every(img => getComputedStyle(img).filter === 'grayscale(1)')"), true);
+  assert.equal(await evaluate("[...document.querySelectorAll('#jokerPreview .joker-big .joker-art')].every(img => getComputedStyle(img).filter === 'none')"), true);
+  assert.equal(await evaluate("document.querySelector('#jokerPreview .joker-big').getAttribute('aria-label')"), '大王');
+  assert.equal(await evaluate("document.querySelector('#jokerPreview .joker-small').getAttribute('aria-label')"), '小王');
+  const jokerShot = await call('Page.captureScreenshot', {format:'png'});
+  await writeFile(path.join(dir, 'jokers.png'), Buffer.from(jokerShot.data, 'base64'));
+  await evaluate("document.querySelector('#jokerPreview [data-card-skin=ink]').classList.add('hand'); document.querySelector('#jokerPreview [data-card-skin=ink] .joker-small').classList.add('up')");
+  assert.equal(await evaluate("getComputedStyle(document.querySelector('#jokerPreview [data-card-skin=ink] .joker-small')).backgroundImage.includes('rgb(255, 253, 246)')"), true, 'selected dark-skin Joker retains readable paper face');
+  await evaluate("document.getElementById('jokerPreview').remove()");
+  console.log('PASS Joker artwork / grayscale / five skins / accessible labels');
   assert.deepEqual(errors, [], "Browser uncaught exceptions");
   console.log("PASS all browser smoke checks");
   await call("Browser.close");
