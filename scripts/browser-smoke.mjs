@@ -97,12 +97,20 @@ try {
   await writeFile(path.join(dir, "lobby.png"), Buffer.from(lobbyShot.data, "base64"));
   await evaluate("document.getElementById('createBtn').click()");
   await until("state && state.code");
+  assert.equal(await evaluate("new URL(location.href).searchParams.get('room') === state.code"), true, 'room URL follows created room');
+  const createdCode = await evaluate("state.code");
+  await call('Page.reload');
+  await until("typeof state !== 'undefined' && state?.code === " + JSON.stringify(createdCode));
+  console.log('PASS room URL / refresh back to seat');
   assert.equal(await evaluate("document.querySelectorAll('.empty-seat').length"), 3);
   assert.equal(await evaluate("document.getElementById('gatheringNote').textContent.includes('还差 3 位')"), true);
   await evaluate(`(async () => { globalThis.chatGuest = io(); await new Promise(resolve => chatGuest.on('connect', resolve));
     chatGuest.emit('join', {code:state.code,name:'来喝茶的朋友'}); })()`);
   await until("state.seats.filter(Boolean).length === 2");
   await until("document.getElementById('chatLog').textContent.includes('来喝茶的朋友到了')");
+  assert.equal(await evaluate("document.getElementById('gatheringNote').textContent.includes('来喝茶的朋友入座')"), true);
+  await evaluate("void chatGuest.emit('gesture', {seat:state.you,kind:'tea'})");
+  await until("document.getElementById('gatheringNote').textContent.includes('给你续了一杯茶')");
   await evaluate("document.querySelector('#quickChat button').click()");
   await until("document.getElementById('chatLog').textContent.includes('谢谢配合')");
   await evaluate("document.querySelectorAll('#quickChat button')[2].click()");
@@ -110,10 +118,15 @@ try {
   await evaluate(`void chatGuest.emit('chat', {text:'<img src=x onerror="alert(1)">'});`);
   await until("document.getElementById('chatLog').textContent.includes('<img')");
   assert.equal(await evaluate("document.querySelectorAll('#chatLog img').length"), 0, 'chat must render as text');
+  assert.equal(await evaluate("document.getElementById('chatCount').classList.contains('unread')"), true);
+  await evaluate("document.getElementById('chatPanel').open = true");
+  await until("!document.getElementById('chatCount').classList.contains('unread')");
+  await evaluate("document.getElementById('chatPanel').open = false");
   await evaluate(`globalThis.originalClipboard = navigator.clipboard.writeText;
     navigator.clipboard.writeText = async text => { globalThis.copiedInvite = text; };
     document.getElementById('inviteBtn').click();`);
   await until("globalThis.copiedInvite?.includes(state.code)");
+  assert.equal(await evaluate("globalThis.copiedInvite.includes('?room=' + state.code)"), true);
   await evaluate(`navigator.clipboard.writeText = async () => { throw Error('denied'); };
     document.getElementById('inviteBtn').click();`);
   await until("!document.getElementById('inviteFallback').classList.contains('hidden')");
@@ -141,7 +154,20 @@ try {
     await call("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
     await sleep(100);
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, `Table overflow ${width}`);
+    assert.equal(await evaluate(`(() => {
+      const tea = document.querySelector('.table-tea'); if (!tea.checkVisibility()) return true;
+      const t = tea.getBoundingClientRect();
+      return [...document.querySelectorAll('.board .seat')].every(seat => {
+        const r = seat.getBoundingClientRect(); return t.right <= r.left || t.left >= r.right || t.bottom <= r.top || t.top >= r.bottom;
+      });
+    })()`), true, 'tea decoration does not cover seats');
     assert.equal(await evaluate("(() => { const board = document.querySelector('.board').getBoundingClientRect(); const banner = document.getElementById('banner').getBoundingClientRect(); return banner.bottom <= board.bottom && banner.top >= board.top; })()"), true, `Banner clipped ${width}`);
+    assert.equal(await evaluate(`(() => {
+      return ['swipeBtn','groupBtn','hintBtn','passBtn','playBtn'].every(id => {
+        const el = document.getElementById(id), r = el.getBoundingClientRect();
+        return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+      });
+    })()`), true, `Controls outside viewport ${width}`);
     await evaluate("document.getElementById('helpBtn').click()");
     assert.equal(await evaluate("document.getElementById('helpLiveNote').hidden"), false);
     await evaluate("document.getElementById('helpDone').click()");
@@ -222,6 +248,16 @@ try {
     state.match.revealedHands = [{seat:1,cards:state.match.hand}, {seat:3,cards:state.match.hand.slice(0,2)}]; render(state);`);
   assert.equal(await evaluate("document.querySelectorAll('#remainingHands .card').length"), 6);
   assert.equal(await evaluate("document.getElementById('roundNotes').textContent.includes('出牌 38 手')"), true);
+  assert.equal(await evaluate("document.querySelectorAll('#roundPlaces li').length"), 4);
+  for (const width of [1440,390]) {
+    await call('Emulation.setDeviceMetricsOverride', {width,height:900,deviceScaleFactor:1,mobile:false});
+    await evaluate("document.getElementById('roundNotes').scrollIntoView({block:'center'})");
+    assert.equal(await evaluate("(() => { const r = document.getElementById('roundContinue').getBoundingClientRect(), f = document.querySelector('.felt').getBoundingClientRect(); return r.top >= f.top && r.bottom <= f.bottom && r.bottom <= innerHeight; })()"), true, 'settlement continue reachable');
+    const shot = await call('Page.captureScreenshot', {format:'png'});
+    await writeFile(path.join(dir, `settlement-${width}.png`), Buffer.from(shot.data,'base64'));
+  }
+  await evaluate("globalThis.continued = ''; const originalEmit = socket.emit; socket.emit = event => { continued = event; }; document.getElementById('roundContinue').click(); socket.emit = originalEmit;");
+  assert.equal(await evaluate("continued"), 'nextRound');
   assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, 'reveal overflow');
   await evaluate("state.match.phase = 'matchOver'; render(state)");
   assert.equal(await evaluate("document.getElementById('remainingHands').classList.contains('hidden')"), false);
@@ -235,6 +271,55 @@ try {
     assert.equal(await evaluate("document.getElementById('chatForm').getBoundingClientRect().height === 0 || !document.getElementById('chatInput').checkVisibility()"), true);
   }
   console.log('PASS settlement reveal / brief notes / next-round cleanup / short viewport');
+  // Full-deal and tall custom stacks must stay reachable, including at max zoom.
+  await evaluate(`state = structuredClone(savedRoom); state.match.turn = state.you;
+    state.match.phase = 'play'; state.match.current = null; selected.clear();
+    handOwner = null; handPilesCustom = false; pilesByOwner.clear(); render(state);`);
+  for (const [width,height] of [[1440,900],[390,640],[720,560],[844,390]]) {
+    await call('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:1,mobile:false});
+    for (const scale of [1,1.6]) {
+      await evaluate(`setZoom(${scale}); document.getElementById('chatPanel').open = false`);
+      await sleep(120);
+      const geometry = await evaluate(`(() => {
+        const scroller = document.getElementById('handScroll');
+        const outer = document.querySelector('.felt'); outer.scrollTop = outer.scrollHeight;
+        const result = {};
+        for (const id of ['swipeBtn','playBtn','passBtn']) {
+          const r = document.getElementById(id).getBoundingClientRect();
+          result[id] = {left:r.left,right:r.right,top:r.top,bottom:r.bottom};
+        }
+        result.width = document.documentElement.scrollWidth;
+        result.card = document.querySelector('#hand .card').getBoundingClientRect().toJSON();
+        result.scroll = {width:scroller.clientWidth,full:scroller.scrollWidth};
+        return result;
+      })()`);
+      for (const id of ['swipeBtn','playBtn','passBtn']) {
+        const r = geometry[id];
+        assert.ok(r.left >= 0 && r.right <= width && r.top >= 0 && r.bottom <= height, `${id} ${width}x${height} zoom${scale}: ${JSON.stringify(r)}`);
+      }
+      assert.ok(geometry.width <= width);
+      assert.ok(geometry.card.height > geometry.card.width * 1.8, 'keep tall rectangular cards');
+      if (geometry.scroll.full > geometry.scroll.width + 2) {
+        await evaluate("document.getElementById('handScroll').scrollLeft = 0; updateHandNavigation(); document.getElementById('handNext').click()");
+        await until("document.getElementById('handScroll').scrollLeft > 0");
+        await evaluate("document.getElementById('handScroll').scrollLeft = document.getElementById('handScroll').scrollWidth");
+        await until("document.getElementById('handNext').disabled");
+      }
+    }
+    await evaluate("setZoom(1); document.querySelector('.felt').scrollTop = 0; document.getElementById('handScroll').scrollLeft = 0");
+    await sleep(100);
+    if (width >= 650 && height <= 500) {
+      assert.equal(await evaluate("(() => { const r = document.getElementById('playBtn').getBoundingClientRect(), f = document.querySelector('.felt').getBoundingClientRect(); return r.top >= f.top && r.bottom <= f.bottom && r.bottom <= innerHeight; })()"), true, 'landscape actions visible without outer scrolling or clipping');
+    }
+    const shot = await call('Page.captureScreenshot', {format:'png'});
+    await writeFile(path.join(dir, `layout-${width}x${height}.png`), Buffer.from(shot.data, 'base64'));
+  }
+  await evaluate(`selected.clear(); for (const card of state.match.hand.slice(0,8)) selected.add(card.id);
+    document.getElementById('groupBtn').click(); setZoom(1.6);`);
+  assert.equal(await evaluate("document.querySelector('#hand .pile').querySelectorAll('.card').length === 8 || [...document.querySelectorAll('#hand .pile')].some(p => p.querySelectorAll('.card').length === 8)"), true);
+  assert.equal(await evaluate("selected.size"), 0, 'grouped cards are put down');
+  assert.equal(await evaluate("(() => { const s = document.getElementById('handScroll'); s.scrollTop = s.scrollHeight; return s.scrollTop > 0 && s.scrollHeight - s.clientHeight - s.scrollTop < 2; })()"), true, 'tall group can be scrolled to bottom');
+  console.log('PASS full hand / visible controls / scroll reach / zoom / landscape');
   // Shared Joker renderer: color distinction survives skins, small cards and selection.
   await call('Emulation.setDeviceMetricsOverride', {width:1000,height:760,deviceScaleFactor:1,mobile:false});
   await evaluate(`(() => {
@@ -264,6 +349,16 @@ try {
   assert.equal(await evaluate("getComputedStyle(document.querySelector('#jokerPreview [data-card-skin=ink] .joker-small')).backgroundImage.includes('rgb(255, 253, 246)')"), true, 'selected dark-skin Joker retains readable paper face');
   await evaluate("document.getElementById('jokerPreview').remove()");
   console.log('PASS Joker artwork / grayscale / five skins / accessible labels');
+  await call('Emulation.setEmulatedMedia', {features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  await evaluate("document.getElementById('gestureLayer').replaceChildren(); playGesture(1,you,'tea','来喝茶的朋友')");
+  assert.equal(await evaluate("document.getElementById('gatheringNote').textContent.includes('续了一杯茶') && !document.getElementById('gestureLayer').children.length"), true);
+  await evaluate("document.getElementById('roundLeave').click()");
+  assert.equal(await evaluate("!document.getElementById('lobby').classList.contains('hidden') && !new URL(location.href).searchParams.has('room')"), true);
+  await call('Page.navigate', {url:'http://127.0.0.1:3317/?room=Z9Z9'});
+  await until("typeof socket !== 'undefined' && socket.connected");
+  assert.equal(await evaluate("document.getElementById('code').value"), 'Z9Z9');
+  assert.equal(await evaluate("document.getElementById('lobbyError').textContent.includes('朋友给你留了座')"), true);
+  console.log('PASS reduced motion / return home / invitation prefill');
   assert.deepEqual(errors, [], "Browser uncaught exceptions");
   console.log("PASS all browser smoke checks");
   await call("Browser.close");

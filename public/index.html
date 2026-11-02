@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0c4a34" />
   <meta name="description" content="饭后无事，凑一桌。以市井烟火·百味人间为主题的四人联网掼蛋，和朋友共享一段闲暇时光。" />
-  <link rel="preload" as="image" href="/courtyard.svg?v=1" />
+  <link rel="preload" as="image" href="/courtyard.svg?v=2" />
   <title>掼蛋桌 · 饭后无事，凑一桌</title>
-  <link rel="stylesheet" href="/styles.css?v=19" />
+  <link rel="stylesheet" href="/styles.css?v=20" />
 </head>
 <body>
   <div id="lobby" class="lobby">
     <button type="button" id="lobbySettingsBtn" class="icon lobby-gear" title="外观设置" aria-label="外观设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <section class="lobby-scene">
-      <img class="lobby-hero" src="/courtyard.svg?v=1" alt="" draggable="false" />
+      <img class="lobby-hero" src="/courtyard.svg?v=2" alt="" draggable="false" />
       <div class="lobby-veil"></div>
       <div class="lobby-copy">
         <p class="kicker">市井烟火 · 百味人间</p>
@@ -96,7 +96,7 @@
     </header>
 
     <section class="courtyard-bar" aria-label="饭后小院">
-      <div><span class="scene-tag">饭后小院</span><span id="gatheringNote">茶还热着，等朋友到齐。</span></div>
+      <div><span class="scene-tag">饭后小院</span><span id="gatheringNote" role="status" aria-live="polite">茶还热着，等朋友到齐。</span></div>
       <button type="button" id="inviteBtn" class="ghost">复制邀约</button>
       <input id="inviteFallback" class="hidden" readonly aria-label="邀约内容，复制失败时可手动复制" />
     </section>
@@ -111,6 +111,7 @@
           <span class="decor-mark">掼蛋</span>
           <span class="decor-caption">饭后小院 · 茶暖人齐</span>
         </div>
+        <svg class="table-tea" viewBox="-80 -80 160 150" aria-hidden="true"><use href="/courtyard.svg?v=2#tea-tray"/></svg>
         <article class="seat seat-top" data-view="2"></article>
         <article class="seat seat-left" data-view="3"></article>
         <article class="seat seat-right" data-view="1"></article>
@@ -121,7 +122,12 @@
           <div id="notice" class="notice hidden"></div>
         </div>
       </div>
-        <p id="roundNotes" class="round-notes hidden" role="status"></p>
+        <section id="roundNotes" class="round-notes hidden" aria-label="本局小记">
+          <h2 id="roundHeadline"></h2>
+          <ol id="roundPlaces" class="round-places"></ol>
+          <p id="roundSummary"></p>
+          <div class="round-actions"><button type="button" id="roundContinue">再坐一局</button><button type="button" id="roundLeave" class="ghost">回到小院</button></div>
+        </section>
         <section id="remainingHands" class="remaining-hands hidden" aria-label="本局剩余手牌"></section>
         <footer class="dock">
           <div class="hand-wrap">
@@ -129,7 +135,14 @@
               <div id="selfStatus" class="self-status"></div>
               <button type="button" id="swipeBtn" class="ghost" aria-pressed="false" title="开启后拖过手牌可连续选中；关闭后恢复拖动组牌">滑选：关</button>
             </div>
-            <div id="hand" class="hand"></div>
+            <div id="handScroll" class="hand-scroll" tabindex="0" aria-label="手牌，可滚动查看">
+              <div id="hand" class="hand"></div>
+            </div>
+            <div id="handNavigation" class="hand-navigation hidden" aria-label="查看手牌">
+              <button type="button" id="handPrev" class="icon ghost" title="向左查看手牌" aria-label="向左查看手牌"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+              <span id="handPosition"></span>
+              <button type="button" id="handNext" class="icon ghost" title="向右查看手牌" aria-label="向右查看手牌"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+            </div>
           </div>
           <div class="play-actions">
             <button type="button" id="groupBtn" class="ghost">组牌</button>
@@ -140,10 +153,10 @@
         </footer>
     </section>
 
-    <details id="chatPanel" class="chat-panel" open>
+    <details id="chatPanel" class="chat-panel">
       <summary>桌边聊聊 <span id="chatCount"></span></summary>
       <div class="chat-body">
-        <div class="chat-heading"><span>仅本桌可见 · 最近 40 条 · 不跨重启保存</span><label><input id="botTalk" type="checkbox" checked />机器人闲聊</label></div>
+        <div class="chat-heading"><span>这一桌的闲话</span><label><input id="botTalk" type="checkbox" checked />机器人闲聊</label></div>
         <div id="chatLog" class="chat-log" role="log" aria-label="本桌聊天" aria-live="polite" aria-relevant="additions"></div>
         <div id="quickChat" class="quick-chat" aria-label="快捷用语">
           <button type="button" class="ghost">谢谢配合</button><button type="button" class="ghost">打得漂亮</button><button type="button" class="ghost">快点出牌</button><button type="button" class="ghost">来了</button><button type="button" class="ghost">等我倒杯水</button><button type="button" class="ghost">再来一局</button>
@@ -235,6 +248,6 @@
   </dialog>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=20"></script>
+  <script src="/app.js?v=21"></script>
 </body>
 </html>

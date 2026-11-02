@@ -382,7 +382,13 @@ function playComboSound(combo) {
 }
 
 const savedSession = readSession();
-if (savedSession) $("code").value = savedSession.code;
+const invitedCode = new URL(location.href).searchParams.get("room")?.trim().toUpperCase();
+const validInvite = /^[A-Z0-9]{4,6}$/.test(invitedCode ?? "");
+let invitationPending = validInvite;
+if (validInvite) {
+  $("code").value = invitedCode;
+  $("lobbyError").textContent = `朋友给你留了座：${invitedCode}，填好昵称就能加入。`;
+} else if (savedSession) $("code").value = savedSession.code;
 applyZoom();
 applySound();
 applyCounter();
@@ -757,6 +763,8 @@ function renderHand(match) {
   // server-sorted hand; manual grouping is preserved until the round changes.
   const key = ownerKey(match);
   if (handOwner !== key) {
+    $("handScroll").scrollLeft = 0;
+    $("handScroll").scrollTop = 0;
     if (handOwner) {
       pilesByOwner.set(handOwner, {
         piles: handPiles.map((pile) => pile.slice()),
@@ -786,6 +794,24 @@ function renderHand(match) {
     }
     hand.append(col);
   });
+  requestAnimationFrame(updateHandNavigation);
+}
+
+function updateHandNavigation() {
+  const scroller = $("handScroll");
+  const max = scroller.scrollWidth - scroller.clientWidth;
+  $("handNavigation").classList.toggle("hidden", max < 2 || !state?.match);
+  $("handPrev").disabled = scroller.scrollLeft < 2;
+  $("handNext").disabled = scroller.scrollLeft >= max - 2;
+  $("handPosition").textContent = max > 1 ? `${Math.round(scroller.scrollLeft / max * 100)}%` : "";
+}
+$("handScroll").addEventListener("scroll", updateHandNavigation, { passive: true });
+new ResizeObserver(updateHandNavigation).observe($("handScroll"));
+for (const [id, direction] of [["handPrev", -1], ["handNext", 1]]) {
+  $(id).addEventListener("click", () => $("handScroll").scrollBy({
+    left: direction * $("handScroll").clientWidth * 0.75,
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth"
+  }));
 }
 
 function applyDrop(id, dest) {
@@ -989,6 +1015,11 @@ function playGesture(from, to, kind, by) {
   const layer = $("gestureLayer");
   const info = GESTURE_KINDS[kind];
   if (!layer || !info) return;
+  const recipient = to === you ? "你" : state?.seats?.[to]?.name ?? "朋友";
+  const sender = from === you ? "你" : by ?? "朋友";
+  gatheringFeedback(kind === "tea" ? `${sender}给${recipient}续了一杯茶，慢慢打。`
+    : kind === "flower" ? `${sender}给${recipient}送了一束花。` : `${sender}向${recipient}扔了个蛋。`);
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const start = seatAnchor(from);
   const end = seatAnchor(to);
   const fly = document.createElement("div");
@@ -1366,6 +1397,12 @@ function pumpStates() {
 }
 
 function render(room) {
+  if (state?.code !== room.code || invitationPending) {
+    const url = new URL(location.href);
+    url.searchParams.set("room", room.code);
+    history.replaceState(null, "", url);
+    invitationPending = false;
+  }
   state = room;
   syncChat(room);
   renderGathering(room);
@@ -1403,14 +1440,38 @@ function render(room) {
   renderHand(match);
   renderCounter(match);
   renderRemainingHands(match);
-  const notes = match?.roundResult?.notes;
-  const settled = ["roundOver", "matchOver"].includes(match?.phase);
-  $("roundNotes").classList.toggle("hidden", !settled || !notes);
-  $("roundNotes").textContent = settled && notes
-    ? `这一桌小记 · 出牌 ${notes.plays} 手 · 队友接风 ${notes.winds} 次。茶还热着，想玩就再来一局。` : "";
+  renderRoundNotes(room);
   renderClock(room);
   renderDifficulty(room);
 }
+
+let settlementKey = "";
+function renderRoundNotes(room) {
+  const match = room.match;
+  const settled = ["roundOver", "matchOver"].includes(match?.phase);
+  const result = match?.roundResult;
+  $("roundNotes").classList.toggle("hidden", !settled || !result);
+  if (!settled || !result) { settlementKey = ""; return; }
+  const key = `${room.code}:${match.round}:${match.phase}`;
+  if (key === settlementKey) return;
+  settlementKey = key;
+  const won = (result.winTeam ?? result.finishOrder?.[0] % 2) === room.you % 2;
+  $("roundHeadline").textContent = match.phase === "matchOver"
+    ? (won ? "我方过 A，这一桌尽兴了" : "对家过 A，好牌下桌再续")
+    : `第 ${match.round} 局小记 · ${result.kind ?? "本局结束"}`;
+  $("roundPlaces").replaceChildren();
+  (result.finishOrder ?? []).forEach((seat, index) => {
+    const item = document.createElement("li");
+    item.classList.toggle("teammate", seat % 2 === room.you % 2);
+    item.textContent = `${["头游", "二游", "三游", "末游"][index]} · ${room.seats[seat]?.name ?? "牌友"}${seat === room.you ? "（你）" : ""}`;
+    $("roundPlaces").append(item);
+  });
+  const notes = result.notes;
+  $("roundSummary").textContent = `${notes ? `出牌 ${notes.plays} 手 · 队友接风 ${notes.winds} 次。` : ""}茶还热着，想玩就再来一局。`;
+  $("roundContinue").textContent = match.phase === "matchOver" ? "重新开桌" : "再坐一局";
+}
+$("roundContinue").addEventListener("click", () => $(state?.match?.phase === "matchOver" ? "startBtn" : "nextBtn").click());
+$("roundLeave").addEventListener("click", () => $("leaveBtn").click());
 
 function renderRemainingHands(match) {
   const panel = $("remainingHands");
@@ -1476,11 +1537,20 @@ function bannerText(room) {
 }
 
 function resetToLobby(message) {
+  const url = new URL(location.href);
+  url.searchParams.delete("room");
+  history.replaceState(null, "", url);
+  invitationPending = false;
   renderEpoch += 1;
   stateQueue = [];
   pumping = false;
   displayed = null;
   state = null;
+  clearTimeout(gatheringTimer);
+  gatheringMessage = "";
+  gatheringRoom = null;
+  gatheringSeats = [];
+  document.querySelector(".courtyard-bar").classList.remove("has-feedback");
   you = -1;
   chatRoom = null;
   chatMessages = [];
@@ -1523,50 +1593,92 @@ function resetToLobby(message) {
 let chatRoom = null;
 let chatMessages = [];
 let chatRendered = "";
+let chatUnread = 0;
+let gatheringRoom = null;
+let gatheringSeats = [];
+let gatheringYou = -1;
+let gatheringMessage = "";
+let gatheringTimer;
+function gatheringFeedback(text) {
+  gatheringMessage = text;
+  clearTimeout(gatheringTimer);
+  $("gatheringNote").textContent = text;
+  document.querySelector(".courtyard-bar").classList.add("has-feedback");
+  gatheringTimer = setTimeout(() => {
+    gatheringMessage = "";
+    document.querySelector(".courtyard-bar").classList.remove("has-feedback");
+    if (state) renderGathering(state);
+  }, 6000);
+}
 let botTalk = localStorage.getItem("guandan-bot-talk") !== "off";
 $("botTalk").checked = botTalk;
 
 function renderGathering(room) {
+  if (gatheringRoom !== room.code) {
+    gatheringRoom = room.code;
+    gatheringSeats = [];
+    gatheringYou = room.you;
+    const missing = 4 - room.seats.filter(Boolean).length;
+    gatheringFeedback(room.match ? "你已回到原牌桌，茶还热着。" : missing ? `你已入座，还差 ${missing} 位。茶还热着。` : "四位到齐，茶暖了，开局吧。");
+  } else if (gatheringSeats.length) {
+    const arrivals = room.seats.filter((person) => person && !gatheringSeats.some((prev) => prev?.name === person.name && prev.bot === person.bot));
+    const returned = room.seats.filter((person, index) => person && !person.bot && person.connected && gatheringSeats[index]?.name === person.name && !gatheringSeats[index]?.connected);
+    if (room.you !== gatheringYou) gatheringFeedback("已换好座位，对面就是你的队友。");
+    else if (arrivals.length) gatheringFeedback(arrivals.map((person) => person.name + (person.bot ? "（机器人）" : "")).join("、") + "入座了，欢迎来喝茶。");
+    else if (returned.length) gatheringFeedback(returned.map((person) => person.name).join("、") + "回到座位了。");
+  }
+  gatheringSeats = room.seats.map((person) => person ? { ...person } : null);
+  gatheringYou = room.you;
   const count = room.seats.filter(Boolean).length;
-  $("gatheringNote").textContent = !room.match
+  $("gatheringNote").textContent = gatheringMessage || (!room.match
     ? (count < 4 ? `还差 ${4 - count} 位，椅子留好了。先邀朋友，再补机器人。` : "四位到齐，茶暖了，开局吧。")
-    : ["roundOver", "matchOver"].includes(room.match.phase) ? "这一局收了，坐坐再走。" : "灯下这一桌，慢慢打，好好配合。";
+    : ["roundOver", "matchOver"].includes(room.match.phase) ? "这一局收了，坐坐再走。" : "灯下这一桌，慢慢打，好好配合。");
   $("table").classList.toggle("waiting", !room.match);
+  $("table").classList.toggle("settled", ["roundOver", "matchOver"].includes(room.match?.phase));
 }
 
 function invitationText() {
-  return `饭后小院凑一桌，房间 ${state.code}，给你留了个位子。\n${location.origin}\n打开地址，填写昵称和房间号加入。（需能访问同一服务地址；localhost 仅本机可用）`;
+  const url = new URL(location.pathname, location.origin);
+  url.searchParams.set("room", state.code);
+  return `饭后小院凑一桌，房间 ${state.code}，给你留了个位子。\n${url.href}\n打开链接，填昵称加入。`;
 }
 $("inviteBtn").addEventListener("click", async () => {
   if (!state) return;
   const text = invitationText();
+  const code = state.code;
   try {
     await navigator.clipboard.writeText(text);
+    if (state?.code !== code) return;
     $("inviteFallback").classList.add("hidden");
-    toast("邀约已复制，发给朋友吧");
+    gatheringFeedback("邀约已复制，发给朋友吧。" + (["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname) ? "当前为本机地址，朋友需要可访问的部署地址。" : ""));
   } catch {
+    if (state?.code !== code) return;
     const input = $("inviteFallback");
     input.value = text;
     input.classList.remove("hidden");
     input.focus(); input.select();
-    toast("浏览器未允许复制，请手动复制邀约");
+    gatheringFeedback("浏览器未允许复制，邀约已展开，可手动复制。");
   }
 });
 
 function syncChat(room) {
+  const initial = chatRoom !== room.code;
   if (chatRoom !== room.code) {
-    chatRoom = room.code; chatMessages = []; chatRendered = "";
+    chatRoom = room.code; chatMessages = []; chatRendered = ""; chatUnread = 0;
     $("chatLog").replaceChildren(); $("chatInput").value = "";
     $("chatStatus").textContent = "";
   }
   const merged = new Map(chatMessages.map((message) => [message.id, message]));
-  for (const message of room.chat ?? []) merged.set(message.id, message);
+  for (const message of room.chat ?? []) {
+    if (!initial && !merged.has(message.id) && !$("chatPanel").open && message.kind !== "system" && message.seat !== (room.you ?? you) && (botTalk || message.kind !== "bot")) chatUnread += 1;
+    merged.set(message.id, message);
+  }
   chatMessages = [...merged.values()].sort((a, b) => a.id - b.id).slice(-40);
   renderChat();
 }
 function renderChat() {
   const messages = chatMessages.filter((message) => botTalk || message.kind !== "bot");
-  const key = messages.map((message) => message.id).join(",");
+  const key = messages.map((message) => message.id).join(",") + ":" + chatUnread;
   if (key === chatRendered) return;
   chatRendered = key;
   const log = $("chatLog");
@@ -1586,8 +1698,12 @@ function renderChat() {
     log.insertBefore(row, next ?? null);
   }
   if (atBottom) log.scrollTop = log.scrollHeight;
-  $("chatCount").textContent = `${messages.length} 条`;
+  $("chatCount").textContent = chatUnread ? `${chatUnread} 条新消息` : `${messages.length} 条`;
+  $("chatCount").classList.toggle("unread", chatUnread > 0);
 }
+$("chatPanel").addEventListener("toggle", () => {
+  if ($("chatPanel").open) { chatUnread = 0; renderChat(); $("chatLog").scrollTop = $("chatLog").scrollHeight; }
+});
 function sendChat(text) {
   if (!socket.connected || !state) { $("chatStatus").textContent = "连接已断开，请回座后再发"; return; }
   if (!text.trim()) return;
@@ -1600,6 +1716,7 @@ $("quickChat").addEventListener("click", (event) => {
   if (button) sendChat(button.textContent);
 });
 $("botTalk").addEventListener("change", () => {
+  chatUnread = 0;
   botTalk = $("botTalk").checked;
   localStorage.setItem("guandan-bot-talk", botTalk ? "on" : "off");
   chatRendered = "force"; renderChat();
@@ -1835,6 +1952,7 @@ buildSettings();
 function rejoinSavedRoom() {
   const session = readSession();
   if (!session) return;
+  if (invitationPending && invitedCode !== session.code && !state) return;
   pendingReconnect = true;
   socket.emit("join", { name: session.name || currentName(), code: session.code, token: deviceToken() });
 }

@@ -301,8 +301,8 @@ input {
   z-index: 0;
   pointer-events: none;
   background-image:
-    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 6px),
-    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.035) 0 2px, transparent 2px 6px);
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.018) 0 1px, transparent 1px 4px);
 }
 .board-decor {
   position: absolute;
@@ -900,7 +900,7 @@ body { overscroll-behavior-y: none; }
   user-select: none;
   -webkit-user-select: none;
 }
-.hand-wrap { overscroll-behavior-x: contain; }
+.hand-scroll { overscroll-behavior: contain; }
 
 @media (max-width: 900px) {
   .topbar {
@@ -1647,14 +1647,14 @@ body { overscroll-behavior-y: none; }
 
 /* ---------------- 饭后小院：场景、留座与聊天 ---------------- */
 .table .topbar { background: rgba(30, 25, 19, 0.92); }
-.courtyard-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 64px; padding: 9px 24px; background: linear-gradient(90deg, #261d14ef, #261d1480), url('/courtyard.svg?v=1') 70% 32% / cover; border-bottom: 1px solid #9e805166; }
+.courtyard-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; min-height: 64px; padding: 9px 24px; background: linear-gradient(90deg, #261d14ef, #261d1480), url('/courtyard.svg?v=2') 70% 32% / cover; border-bottom: 1px solid #9e805166; }
 .courtyard-bar > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
 .scene-tag { color: #f1d4a0; font-family: 'SimSun', serif; font-size: 18px; letter-spacing: .15em; }
 #gatheringNote { font-size: 13px; color: #e1d0b1; }
 #inviteBtn { min-height: 32px; padding: 5px 12px; border-color: #9e8051; border-radius: 5px; font-size: 13px; }
 #inviteFallback { flex-basis: 100%; }
 .table .board { min-height: 310px; }
-.table.waiting .board { background: linear-gradient(#1d3522a8, #1d3522bf), url('/courtyard.svg?v=1') 65% 55% / cover; }
+.table.waiting .board { background: linear-gradient(#1d3522a8, #1d3522bf), url('/courtyard.svg?v=2') 65% 55% / cover; }
 .table.waiting .trick { display: none; }
 .table.waiting .dock { min-height: 50px; }
 .table.waiting #hand, .table.waiting .play-actions, .table.waiting #swipeBtn { display: none; }
@@ -1712,7 +1712,7 @@ body { overscroll-behavior-y: none; }
   background:
     radial-gradient(ellipse at 50% 0%, rgba(234, 184, 108, 0.13), transparent 65%),
     linear-gradient(#241d1655, #241d16bb),
-    url('/courtyard.svg?v=1') center / cover fixed,
+    url('/courtyard.svg?v=2') center / cover fixed,
     #241d16;
 }
 .decor-caption {
@@ -1781,4 +1781,118 @@ body:has(.help-dialog[open]) { overflow: hidden; }
   .help-head { padding: 16px; gap: 8px; }
   .help-body { padding: 4px 16px 20px; }
   .help-steps { grid-template-columns: 1fr; gap: 10px; }
+}
+
+/* Keep tools outside the card scroller, including when the hand is zoomed. */
+.table { height: 100dvh; }
+.table-tea { position: absolute; width: 80px; height: 75px; left: 28px; top: 8px; pointer-events: none; opacity: .9; }
+.lobby-veil { background: linear-gradient(90deg, #122a24db, #122a2466 48%, transparent 85%); }
+.lobby-hero { object-position: 72% 48%; }
+.lobby-invitation { font-size: 36px; letter-spacing: 0; }
+.lobby-story { color: #e1eadb; }
+.table .topbar { background: #182b25f2; }
+.courtyard-bar { background: #1e332cd9; }
+.scene-tag, .decor-caption { letter-spacing: 0; }
+.seat { border-radius: 6px; background: #102c246e; }
+.empty-seat { border-radius: 6px; }
+.chat-panel { border-radius: 6px; background: #182b25f2; }
+.chat-panel > summary { min-height: 40px; }
+.quick-chat button { border-radius: 6px; }
+.courtyard-bar.has-feedback #gatheringNote { color: #ffdf9e; }
+#chatCount.unread { color: #ffe0a2; font-weight: 700; }
+.round-notes { border-radius: 6px; margin-bottom: 10px; }
+.round-notes h2 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
+.round-notes p { margin: 10px 0; }
+.round-places { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: none; margin: 0; padding: 0; }
+.round-places li { color: #e1d6bf; }
+.round-places li.teammate { color: #c7eed0; }
+.round-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.round-actions button { border-radius: 6px; }
+.table.settled .board { flex-basis: 150px; min-height: 150px; }
+.table.settled .dock { display: none; }
+.table.settled .center { inset: 70px 8px 4px; }
+.table.settled .trick { display: none; }
+.table.settled .table-tea { display: none; }
+.decor-ring { border-width: 1px; box-shadow: inset 0 0 0 7px var(--felt-ring); }
+.felt { min-width: 0; scrollbar-width: thin; }
+.felt .board { flex: 1 0 240px; min-height: 240px; }
+.dock { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.hand-wrap { overflow: visible; min-height: 0; }
+.hand-tools { min-width: 0; }
+.self-status { min-width: 0; flex-wrap: wrap; }
+.self-status b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#swipeBtn { flex-shrink: 0; }
+.hand-scroll {
+  min-width: 0;
+  max-height: min(39dvh, 390px);
+  overflow: auto;
+  padding: 4px 6px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #c9b278 #163b2e;
+  scroll-padding: 12px;
+}
+.hand { --stack: calc(var(--card-w) * .76); }
+.hand-navigation { display: flex; justify-content: center; align-items: center; gap: 12px; height: 30px; }
+.hand-navigation button.icon { width: 32px; min-width: 32px; min-height: 28px; }
+.hand-navigation span { width: 40px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; color: #d2dbd2; }
+.play-actions { justify-content: center; padding: 0; }
+.play-actions button { min-width: 96px; border-radius: 6px; }
+.table.waiting .hand-scroll, .table.waiting .hand-navigation { display: none; }
+.chat-panel { flex-shrink: 0; }
+@media (max-width: 900px) {
+  .table-tea { width: 52px; height: 49px; left: 8px; top: 3px; opacity: .65; }
+  .top-actions { gap: 5px; }
+  .courtyard-bar { min-height: 48px; padding: 6px 12px; }
+  .felt .board { flex-basis: 220px; min-height: 220px; }
+  .hand-scroll { max-height: 35dvh; }
+}
+@media (max-width: 560px) {
+  .table-tea { display: none; }
+  .lobby-invitation { font-size: 25px; }
+  .courtyard-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  .courtyard-bar > div { gap: 3px; }
+  #inviteFallback { grid-column: 1 / -1; }
+  .felt .board { flex-basis: 210px; min-height: 210px; }
+  .seat-left, .seat-right { top: 44px; }
+  .seat-top { top: 6px; }
+  .center { inset: 88px 6px 4px; gap: 4px; }
+  .notice { margin-top: 0; }
+  .dock { position: sticky; bottom: 0; padding: 6px 8px max(8px, env(safe-area-inset-bottom)); background: var(--felt-dark); }
+  .hand-scroll { max-height: 31dvh; }
+  .hand { gap: 10px; }
+  .play-actions button { min-width: 0; min-height: 44px; }
+  .chat-panel > summary { padding: 8px 12px; }
+  .top-actions button { min-height: 34px; }
+}
+@media (max-height: 650px) {
+  .felt .board { flex-basis: 190px; min-height: 190px; }
+  .hand-scroll { max-height: 28dvh; }
+  .courtyard-bar { min-height: 40px; }
+  .scene-tag { font-size: 14px; }
+  .courtyard-bar:not(.has-feedback) #gatheringNote { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lobby-hero { animation: none; transform: none; }
+  .seat.turn { animation: none; }
+  .hand-scroll { scroll-behavior: auto; }
+}
+@media (min-width: 650px) and (max-height: 500px) {
+  .table .topbar { flex-direction: row; flex-wrap: nowrap; align-items: center; padding: 4px 10px; gap: 8px; }
+  .top-info { width: auto; flex-shrink: 0; }
+  .top-actions { width: auto; }
+  .courtyard-bar { min-height: 32px; padding: 3px 10px; }
+  .courtyard-bar button { min-height: 28px; padding: 3px 10px; }
+  .table:not(.waiting):not(.settled) .felt { display: grid; grid-template-columns: minmax(0, .45fr) minmax(0, .55fr); align-items: stretch; }
+  .table:not(.waiting):not(.settled) .board { min-height: 210px; }
+  .table:not(.waiting):not(.settled) .dock { margin-top: 0; align-content: end; padding: 4px 8px 6px; gap: 4px; }
+  .hand-wrap { gap: 3px; }
+  .hand-scroll { max-height: max(90px, calc(100dvh - 275px)); }
+  .play-actions button { min-width: 0; flex: 1; min-height: 34px; padding: 5px 4px; }
+  .seat { min-width: 78px; max-width: 45%; }
+  .seat b { font-size: 13px; }
+  .seat span { font-size: 11px; }
+  .seat-left, .seat-right { top: 48px; }
+  .center { inset: 92px 6px 4px; gap: 3px; }
+  .table-tea, .decor-caption { display: none; }
+  .chat-panel > summary { min-height: 30px; padding: 5px 12px; }
 }

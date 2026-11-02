@@ -4,3 +4,5 @@ node_modules/
 npm-debug.log*
 guandan-for-classmate.zip
 tmp-browser-smoke/
+chrome/
+submissions/
